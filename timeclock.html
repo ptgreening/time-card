@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Time Clock</title>
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Time Clock" />
+  <meta name="theme-color" content="#EF9F27" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #F2F2F7; min-height: 100vh; color: #000; }
+    .screen { display: none; flex-direction: column; min-height: 100vh; }
+    .screen.on { display: flex; }
+    input:not([type=checkbox]):not([type=time]), select, textarea {
+      width: 100%; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid #E5E5EA; font-size: 15px;
+      font-family: inherit; background: #F9F9FB; color: #000; outline: none; margin-top: 6px;
+    }
+    input[type=time] {
+      padding: 7px 8px; border-radius: 8px; border: 1px solid #E5E5EA;
+      font-size: 13px; font-family: inherit; background: #F9F9FB; color: #000; outline: none; width: 100%;
+    }
+    label { display: block; font-size: 12px; color: #6C6C70; margin-top: 12px; }
+    .hdr { background: #fff; border-bottom: 1px solid #E5E5EA; padding: 16px; display: flex; align-items: center; justify-content: space-between; }
+    .back { background: none; border: none; color: #007AFF; font-size: 15px; cursor: pointer; padding: 0; display: flex; align-items: center; gap: 4px; font-family: inherit; }
+    .card { background: #fff; border-radius: 12px; border: 1px solid #E5E5EA; padding: 16px 20px; margin-bottom: 10px; }
+    .btn { width: 100%; padding: 14px; border-radius: 12px; border: none; font-size: 15px; font-weight: 500; cursor: pointer; margin-top: 8px; font-family: inherit; }
+    .btn-amber { background: #EF9F27; color: #412402; }
+    .btn-green { background: #3B6D11; color: #EAF3DE; }
+    .btn-red { background: #A32D2D; color: #FCEBEB; }
+    .btn-ghost { background: transparent; border: 1px solid #C7C7CC; color: #000; }
+    .tab-bar { background: #fff; border-bottom: 1px solid #E5E5EA; display: flex; }
+    .tab { flex: 1; padding: 10px 0; background: none; border: none; border-bottom: 2px solid transparent; font-size: 14px; cursor: pointer; color: #6C6C70; font-family: inherit; }
+    .tab.on { border-bottom-color: #EF9F27; color: #BA7517; font-weight: 500; }
+    .body { flex: 1; padding: 16px; overflow-y: auto; }
+    .emp-row { display: flex; align-items: center; padding: 15px 16px; background: #fff; border: none; border-bottom: 1px solid #E5E5EA; cursor: pointer; width: 100%; text-align: left; font-family: inherit; font-size: 15px; color: #000; }
+    .emp-row:last-child { border-bottom: none; }
+    .active-card { background: #fff; border-radius: 12px; border: 2px solid #3B6D11; padding: 20px; margin-bottom: 10px; }
+    .ml { font-size: 11px; color: #6C6C70; text-transform: uppercase; letter-spacing: .5px; }
+    .pin-key { height: 68px; border-radius: 14px; border: 1px solid #E5E5EA; background: #fff; font-size: 22px; font-weight: 500; cursor: pointer; color: #000; font-family: inherit; }
+    .tc { background: #fff; border-radius: 12px; border: 1px solid #E5E5EA; margin-bottom: 10px; overflow: hidden; }
+    .th { padding: 10px 16px; background: #F9F9FB; font-weight: 500; font-size: 14px; border-bottom: 1px solid #E5E5EA; display: flex; justify-content: space-between; align-items: center; }
+    .tt { padding: 10px 16px; background: #EAF3DE; }
+    .pr { padding: 10px 16px; border-bottom: 1px solid #E5E5EA; }
+    .cr { padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 14px; border-bottom: 1px solid #E5E5EA; }
+    .cr:last-child { border-bottom: none; }
+    .cl { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; color: #000; }
+    .wb { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .wn { padding: 8px 14px; border-radius: 8px; border: 1px solid #E5E5EA; background: #fff; cursor: pointer; font-size: 16px; color: #000; font-family: inherit; }
+    .warn { background: #FAEEDA; border-radius: 12px; border: 1px solid #FAC775; padding: 12px 16px; margin-bottom: 10px; }
+    .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: #1C1C1E; color: #fff; padding: 10px 20px; border-radius: 20px; font-size: 14px; font-weight: 500; z-index: 999; animation: fadeIn .2s; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+    /* Staff login hidden on phones/tablets — desktop only */
+    @media (max-width: 900px) { #staff-login-btn { display: none !important; } }
+    .spinner { width: 32px; height: 32px; border: 3px solid #E5E5EA; border-top-color: #EF9F27; border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="splash" class="screen on" style="align-items:center;justify-content:center;gap:16px">
+  <div class="spinner"></div>
+  <p style="color:#6C6C70;font-size:14px" id="splash-msg">Connecting…</p>
+</div>
+
+<!-- ERROR -->
+<div id="error-screen" class="screen" style="align-items:center;justify-content:center;padding:32px;text-align:center">
+  <i class="ti ti-wifi-off" style="font-size:48px;color:#C7C7CC;margin-bottom:16px"></i>
+  <div style="font-size:18px;font-weight:600;margin-bottom:8px">Connection Error</div>
+  <div id="error-msg" style="font-size:14px;color:#6C6C70;margin-bottom:24px">Could not connect to the database.</div>
+  <button onclick="location.reload()" class="btn btn-amber" style="max-width:200px">Try again</button>
+</div>
+
+<!-- HOME -->
+<div id="home" class="screen">
+  <div class="hdr">
+    <div>
+      <div id="hdr-time" style="font-size:26px;font-weight:500;letter-spacing:-0.5px"></div>
+      <div id="hdr-date" style="font-size:13px;color:#6C6C70;margin-top:2px"></div>
+    </div>
+    <button id="staff-login-btn" onclick="goAccess()" style="background:none;border:1px solid #C7C7CC;border-radius:8px;padding:5px 12px;font-size:13px;color:#6C6C70;cursor:pointer;font-family:inherit">Staff login</button>
+  </div>
+  <div style="padding:20px 16px 8px">
+    <p style="font-size:16px;font-weight:500;margin-bottom:4px">Welcome</p>
+    <p style="font-size:14px;color:#6C6C70;margin-bottom:14px">Type your name to clock in or out</p>
+    <input id="search" placeholder="Your name…" oninput="renderSearch()" autocomplete="off" style="border-radius:12px;font-size:16px;padding:14px 16px;margin-top:0" />
+  </div>
+  <div class="body" style="padding-top:8px"><div id="search-results"></div></div>
+</div>
+
+<!-- EMPLOYEE -->
+<div id="employee" class="screen">
+  <div class="hdr">
+    <button class="back" onclick="cancelAndGoHome()"><i class="ti ti-arrow-left"></i> Back</button>
+    <span id="emp-hdr" style="font-weight:500;font-size:17px"></span>
+    <span style="width:60px"></span>
+  </div>
+  <div class="body" id="emp-body"></div>
+</div>
+
+<!-- ACCESS / PIN -->
+<div id="access" class="screen">
+  <div class="hdr">
+    <button class="back" onclick="goHome()"><i class="ti ti-arrow-left"></i> Back</button>
+    <span style="font-weight:500">Staff login</span>
+    <span style="width:60px"></span>
+  </div>
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px">
+    <div style="font-size:16px;font-weight:500;margin-bottom:28px">Enter your PIN</div>
+    <div id="pin-dots" style="display:flex;gap:12px;margin-bottom:36px"></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:260px" id="pin-pad"></div>
+  </div>
+</div>
+
+<!-- DASHBOARD (Manager / Admin) -->
+<div id="dashboard" class="screen">
+  <div class="hdr">
+    <button class="back" onclick="goHome()"><i class="ti ti-arrow-left"></i> Back</button>
+    <span id="dash-title" style="font-weight:500;font-size:17px"></span>
+    <span style="width:60px"></span>
+  </div>
+  <div class="tab-bar" id="dash-tabs"></div>
+  <div class="body" id="dash-body"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  CONFIGURATION  —  replace these two values with yours
+// ═══════════════════════════════════════════════════════════════
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';       // e.g. https://abcxyz.supabase.co
+const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY';  // from Settings → API → anon public key
+// ═══════════════════════════════════════════════════════════════
+
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ── STATE ────────────────────────────────────────────────────
+const DEFS = {
+  roles: ['Manager','Actor','Makeup Artist','Crowd Control','Carnival Crew'],
+  locations: ['Main Site','Storage Lot A','Storage Lot B','Office'],
+  managerPin: '1234', adminPin: '5678'
+};
+const S = {
+  roster:[], punches:[], flags:{}, config:{...DEFS},
+  selId:null, isAdmin:false, isPersonalDevice:false,
+  tab:'daily', viewDate:'', wkOff:0,
+  pinBuf:'', pinErr:false, switchMode:false,
+  showFlagSearch:false, resetTimer:null, resetInterval:null
+};
+
+// ── HELPERS ──────────────────────────────────────────────────
+const p2 = n => String(n).padStart(2,'0');
+function todayKey(){ const d=new Date(); return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`; }
+function dateKey(iso){ const d=new Date(iso); return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`; }
+function fmtTime(iso){ return new Date(iso).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}); }
+function fmtNow(){ return new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}); }
+function fmtToday(){ return new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}); }
+function fmtDateDisp(ds){ return new Date(ds+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}); }
+function isoToT(iso){ const d=new Date(iso); return `${p2(d.getHours())}:${p2(d.getMinutes())}`; }
+function tToIso(t,ds){ return new Date(`${ds}T${t}:00`).toISOString(); }
+function hoursD(ms){ return (Math.max(0,ms)/3600000).toFixed(2); }
+function elapsed(ci){ const ms=Date.now()-new Date(ci); return `${Math.floor(ms/3600000)}h ${Math.floor((ms%3600000)/60000)}m`; }
+function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2); }
+function getActive(eid){ return S.punches.find(p=>p.eid===eid&&!p.out)||null; }
+function weekStart(off){ const d=new Date(); d.setDate(d.getDate()-d.getDay()+(off*7)); d.setHours(0,0,0,0); return d; }
+function getFlag(eid,date){ return S.flags[`${eid}_${date}`]||{}; }
+function netMs(eid,date){
+  const ms = S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.in)===date).reduce((s,p)=>s+(new Date(p.out)-new Date(p.in)),0);
+  return Math.max(0, ms-(getFlag(eid,date).lunch ? 30*60*1000 : 0));
+}
+function normPunch(p){ return { id:p.id, eid:p.employee_id, name:p.employee_name, role:p.role, loc:p.location, in:p.clock_in, out:p.clock_out }; }
+
+function showToast(msg, ms=2500){
+  document.querySelectorAll('.toast').forEach(t=>t.remove());
+  const t=document.createElement('div'); t.className='toast'; t.textContent=msg;
+  document.body.appendChild(t); setTimeout(()=>t.remove(),ms);
+}
+
+// ── DATABASE ─────────────────────────────────────────────────
+async function loadAll(){
+  const [eR,pR,fR,cR] = await Promise.all([
+    db.from('tc_employees').select('*').order('name'),
+    db.from('tc_punches').select('*').order('clock_in'),
+    db.from('tc_day_flags').select('*'),
+    db.from('tc_config').select('*').eq('id',1).single()
+  ]);
+  if(eR.data) S.roster = eR.data.map(e=>({id:e.id,name:e.name}));
+  if(pR.data) S.punches = pR.data.map(normPunch);
+  if(fR.data){ S.flags={}; fR.data.forEach(f=>{ S.flags[`${f.employee_id}_${f.flag_date}`]={lunch:f.lunch,ncns:f.ncns,short:f.short_notice}; }); }
+  if(cR.data) S.config={roles:cR.data.roles,locations:cR.data.locations,managerPin:cR.data.manager_pin,adminPin:cR.data.admin_pin};
+  if(eR.error||pR.error) throw new Error('Load failed');
+}
+
+async function dbClockIn(eid,name,role,loc){
+  const id=genId(), now=new Date().toISOString();
+  const {error}=await db.from('tc_punches').insert({id,employee_id:eid,employee_name:name,role,location:loc,clock_in:now});
+  if(!error) S.punches.push({id,eid,name,role,loc,in:now,out:null});
+  return !error;
+}
+async function dbClockOut(punchId){
+  const now=new Date().toISOString();
+  const {error}=await db.from('tc_punches').update({clock_out:now}).eq('id',punchId);
+  if(!error) S.punches=S.punches.map(p=>p.id===punchId?{...p,out:now}:p);
+  return !error;
+}
+async function dbSwitchRole(punchId,newRole,newLoc){
+  const now=new Date().toISOString(), old=S.punches.find(p=>p.id===punchId);
+  const newId=genId();
+  await Promise.all([
+    db.from('tc_punches').update({clock_out:now}).eq('id',punchId),
+    db.from('tc_punches').insert({id:newId,employee_id:old.eid,employee_name:old.name,role:newRole,location:newLoc,clock_in:now})
+  ]);
+  S.punches=S.punches.map(p=>p.id===punchId?{...p,out:now}:p);
+  S.punches.push({id:newId,eid:old.eid,name:old.name,role:newRole,loc:newLoc,in:now,out:null});
+}
+async function dbEditTime(punchId,field,newIso){
+  const col=field==='in'?'clock_in':'clock_out';
+  await db.from('tc_punches').update({[col]:newIso}).eq('id',punchId);
+  S.punches=S.punches.map(p=>p.id===punchId?{...p,[field]:newIso}:p);
+}
+async function dbSetFlag(eid,date,flags){
+  const id=`${eid}_${date}`;
+  await db.from('tc_day_flags').upsert({id,employee_id:eid,flag_date:date,lunch:!!flags.lunch,ncns:!!flags.ncns,short_notice:!!flags.short});
+  S.flags[`${eid}_${date}`]=flags;
+}
+async function dbSaveRoster(names){
+  const newRoster=names.map(name=>S.roster.find(e=>e.name===name)||{id:genId(),name});
+  const newIds=new Set(newRoster.map(e=>e.id));
+  const toDelete=S.roster.filter(e=>!newIds.has(e.id)).map(e=>e.id);
+  if(toDelete.length) await db.from('tc_employees').delete().in('id',toDelete);
+  if(newRoster.length) await db.from('tc_employees').upsert(newRoster.map(e=>({id:e.id,name:e.name})));
+  S.roster=newRoster;
+}
+async function dbSaveConfig(cfg){
+  await db.from('tc_config').update({roles:cfg.roles,locations:cfg.locations,manager_pin:cfg.managerPin,admin_pin:cfg.adminPin}).eq('id',1);
+  S.config=cfg;
+}
+
+function setupRealtime(){
+  db.channel('tc-live')
+    .on('postgres_changes',{event:'*',schema:'public',table:'tc_punches'},payload=>{
+      if(payload.eventType==='INSERT'&&!S.punches.find(p=>p.id===payload.new.id)) S.punches.push(normPunch(payload.new));
+      else if(payload.eventType==='UPDATE') S.punches=S.punches.map(p=>p.id===payload.new.id?normPunch(payload.new):p);
+      const sc=document.querySelector('.screen.on');
+      if(sc?.id==='dashboard'&&S.tab==='daily') renderDash();
+    })
+    .subscribe();
+}
+
+// ── NAVIGATION ───────────────────────────────────────────────
+function show(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on')); document.getElementById(id).classList.add('on'); }
+function clearReset(){ if(S.resetTimer){clearTimeout(S.resetTimer);S.resetTimer=null} if(S.resetInterval){clearInterval(S.resetInterval);S.resetInterval=null} }
+function goHome(){
+  clearReset(); show('home'); renderHdr();
+  const s=document.getElementById('search'); if(s)s.value='';
+  document.getElementById('search-results').innerHTML='';
+}
+function cancelAndGoHome(){ clearReset(); goHome(); }
+function goAccess(){ S.pinBuf=''; S.pinErr=false; buildPin(); show('access'); }
+function renderHdr(){
+  const e=document.getElementById('hdr-time'); if(e) e.textContent=fmtNow();
+  const d=document.getElementById('hdr-date'); if(d) d.textContent=fmtToday();
+}
+
+// ── HOME ────────────────────────────────────────────────────
+function renderSearch(){
+  const q=(document.getElementById('search')||{}).value||'';
+  const el=document.getElementById('search-results'); if(!el)return;
+  if(!q.trim()){el.innerHTML='';return}
+  const f=S.roster.filter(e=>e.name.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>a.name.localeCompare(b.name)).slice(0,8);
+  if(!f.length){el.innerHTML=`<p style="font-size:14px;color:#6C6C70">No match — check spelling or ask a manager</p>`;return}
+  el.innerHTML=`<div style="border-radius:12px;overflow:hidden;border:1px solid #E5E5EA">${f.map(e=>`<button class="emp-row" onclick="openEmp('${e.id}')"><i class="ti ti-user" style="font-size:16px;color:#C7C7CC;margin-right:12px"></i>${e.name}<i class="ti ti-chevron-right" style="font-size:14px;color:#C7C7CC;margin-left:auto"></i></button>`).join('')}</div>`;
+}
+
+// ── EMPLOYEE SCREEN ──────────────────────────────────────────
+function openEmp(eid){
+  S.selId=eid; S.switchMode=false;
+  const emp=S.roster.find(e=>e.id===eid);
+  document.getElementById('emp-hdr').textContent=emp?emp.name:'';
+  renderEmpBody(); show('employee');
+}
+
+function canClockIn(eid){
+  const today=todayKey();
+  const outs=S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.out)===today).sort((a,b)=>new Date(b.out)-new Date(a.out));
+  if(!outs.length)return{ok:true};
+  const diff=Date.now()-new Date(outs[0].out).getTime();
+  if(diff<30*60*1000){const wu=new Date(new Date(outs[0].out).getTime()+30*60*1000);return{ok:false,wu}}
+  return{ok:true};
+}
+
+function weekSummary(eid){
+  const ws=weekStart(0),we=new Date(ws.getTime()+7*864e5);
+  const wkp=S.punches.filter(p=>p.eid===eid&&p.out&&new Date(p.in)>=ws&&new Date(p.in)<we);
+  const byRole={}; wkp.forEach(p=>{const ms=new Date(p.out)-new Date(p.in);byRole[p.role]=(byRole[p.role]||0)+ms});
+  return{byRole,totalMs:Object.values(byRole).reduce((a,b)=>a+b,0)};
+}
+
+function renderEmpBody(){
+  const emp=S.roster.find(e=>e.id===S.selId); if(!emp){goHome();return}
+  const act=getActive(emp.id);
+  const body=document.getElementById('emp-body'); if(!body)return;
+  const{byRole,totalMs}=weekSummary(emp.id);
+  const weekHtml=totalMs>0?`<div class="card" style="margin-top:4px"><div class="ml" style="margin-bottom:10px">My week so far</div>${Object.entries(byRole).map(([r,ms])=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px"><span>${r}</span><span style="font-weight:500">${hoursD(ms)} hrs</span></div>`).join('')}<div style="border-top:1px solid #E5E5EA;margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;font-size:14px;font-weight:500"><span>Total</span><span>${hoursD(totalMs)} hrs</span></div></div>`:'';
+  const notYouHtml=S.isPersonalDevice?`<div style="text-align:center;margin-top:16px"><button onclick="forgetDevice()" style="background:none;border:none;font-size:12px;color:#8E8E93;cursor:pointer;text-decoration:underline">Not ${emp.name}? Switch user</button></div>`:'';
+
+  if(act){
+    body.innerHTML=`<div class="active-card"><div class="ml" style="color:#3B6D11;margin-bottom:8px">Currently clocked in</div><div style="font-size:20px;font-weight:500;margin-bottom:2px">${act.role}</div><div style="font-size:13px;color:#6C6C70;margin-bottom:14px">${act.loc}</div><div style="display:flex;gap:24px"><div><div class="ml">Clock in</div><div style="font-size:15px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div><div><div class="ml">Elapsed</div><div id="el-val" style="font-size:15px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div></div></div>${S.switchMode?`<div class="card"><div style="font-weight:500;margin-bottom:4px">Switch to…</div><label>New role</label><select id="sw-r" style="margin-top:6px">${S.config.roles.map(r=>`<option>${r}</option>`).join('')}</select><label>Location</label><select id="sw-l" style="margin-top:6px">${S.config.locations.map(l=>`<option>${l}</option>`).join('')}</select><button class="btn btn-amber" onclick="doSwitch('${act.id}')">Confirm switch</button><button class="btn btn-ghost" onclick="S.switchMode=false;renderEmpBody()">Cancel</button></div>`:`<button class="btn btn-ghost" onclick="S.switchMode=true;renderEmpBody()"><i class="ti ti-refresh"></i> Switch role / location</button><button class="btn btn-red" onclick="doClockOut('${act.id}')">Clock out</button>`}${weekHtml}${notYouHtml}`;
+  } else {
+    const chk=canClockIn(emp.id);
+    body.innerHTML=`${!chk.ok?`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-clock"></i> Break in progress</div><div style="font-size:13px;color:#854F0B">You can clock back in after <strong>${chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</strong></div></div>`:''}<div class="card"><div style="font-size:14px;color:#6C6C70;margin-bottom:4px">Select your role and location</div><label>Role</label><select id="ci-r" style="margin-top:6px">${S.config.roles.map(r=>`<option>${r}</option>`).join('')}</select><label>Location</label><select id="ci-l" style="margin-top:6px">${S.config.locations.map(l=>`<option>${l}</option>`).join('')}</select></div><button class="btn btn-green" onclick="doClockIn()" ${!chk.ok?'disabled style="opacity:.4;cursor:not-allowed"':''}>Clock in</button>${weekHtml}${notYouHtml}`;
+  }
+}
+
+async function doClockIn(){
+  const emp=S.roster.find(e=>e.id===S.selId); if(!emp||!canClockIn(emp.id).ok)return;
+  const role=document.getElementById('ci-r').value, loc=document.getElementById('ci-l').value;
+  const ok=await dbClockIn(emp.id,emp.name,role,loc);
+  if(!ok){showToast('⚠️ Save failed — check connection');return}
+  if(S.isPersonalDevice){ showToast(`Clocked in as ${role} ✓`); renderEmpBody(); }
+  else { offerRememberMe(emp,role); }
+}
+
+async function doClockOut(pid){
+  const ok=await dbClockOut(pid);
+  if(!ok){showToast('⚠️ Save failed — check connection');return}
+  if(S.isPersonalDevice){ showToast('Clocked out ✓'); renderEmpBody(); }
+  else { startAutoReset('Clocked out — have a great day!'); }
+}
+
+async function doSwitch(pid){
+  const nr=document.getElementById('sw-r').value, nl=document.getElementById('sw-l').value;
+  await dbSwitchRole(pid,nr,nl); S.switchMode=false;
+  if(S.isPersonalDevice){ showToast(`Switched to ${nr} ✓`); renderEmpBody(); }
+  else { startAutoReset(`Switched to ${nr}`); }
+}
+
+function offerRememberMe(emp,role){
+  const body=document.getElementById('emp-body'); if(!body)return;
+  body.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:32px">
+    <i class="ti ti-circle-check" style="font-size:56px;color:#3B6D11;display:block;margin-bottom:20px"></i>
+    <div style="font-size:20px;font-weight:500;margin-bottom:6px">Clocked in as ${role}</div>
+    <div style="font-size:14px;color:#6C6C70;margin-bottom:28px">Is this your personal phone?</div>
+    <button onclick="rememberMe()" class="btn btn-green" style="max-width:280px;margin-top:0">Yes — save my name to this phone</button>
+    <button onclick="startAutoReset('')" class="btn btn-ghost" style="max-width:280px">No — shared / tablet device</button>
+  </div>`;
+}
+
+function rememberMe(){
+  localStorage.setItem('tc_empId',S.selId);
+  S.isPersonalDevice=true; renderEmpBody(); showToast('Saved to this device ✓');
+}
+
+function forgetDevice(){
+  localStorage.removeItem('tc_empId'); S.isPersonalDevice=false; S.selId=null; goHome();
+}
+
+function startAutoReset(msg){
+  const body=document.getElementById('emp-body'); if(!body)return;
+  let n=4;
+  body.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:32px">
+    <i class="ti ti-circle-check" style="font-size:56px;color:#3B6D11;display:block;margin-bottom:20px"></i>
+    ${msg?`<div style="font-size:20px;font-weight:500;margin-bottom:8px">${msg}</div>`:''}
+    <div id="cd" style="font-size:14px;color:#6C6C70;margin-bottom:24px">Returning in ${n}…</div>
+    <button onclick="cancelAndGoHome()" style="background:none;border:1px solid #C7C7CC;border-radius:8px;padding:8px 18px;font-size:14px;color:#6C6C70;cursor:pointer">Done now</button>
+  </div>`;
+  S.resetInterval=setInterval(()=>{ n--; const e=document.getElementById('cd'); if(e)e.textContent=`Returning in ${n}…`; if(n<=0){clearReset();goHome();} },1000);
+}
+
+// ── PIN ──────────────────────────────────────────────────────
+function buildPin(){
+  const len=Math.max(S.config.managerPin.length,S.config.adminPin.length);
+  const dots=document.getElementById('pin-dots'),pad=document.getElementById('pin-pad'); if(!dots||!pad)return;
+  dots.innerHTML=Array.from({length:len}).map((_,i)=>`<div style="width:14px;height:14px;border-radius:50%;background:${i<S.pinBuf.length?(S.pinErr?'#E53935':'#EF9F27'):'#E5E5EA'}"></div>`).join('');
+  pad.innerHTML=['1','2','3','4','5','6','7','8','9','','0','⌫'].map(d=>`<button class="pin-key" onclick="${d==='⌫'?'pinBack()':d?`pinDigit('${d}')`:''}}">${d}</button>`).join('');
+}
+function pinDigit(d){
+  S.pinBuf+=d; buildPin();
+  if(S.pinBuf===S.config.adminPin){S.isAdmin=true;setTimeout(openDash,100);return}
+  if(S.pinBuf===S.config.managerPin){S.isAdmin=false;setTimeout(openDash,100);return}
+  if(S.pinBuf.length>=Math.max(S.config.managerPin.length,S.config.adminPin.length)){S.pinErr=true;buildPin();setTimeout(()=>{S.pinBuf='';S.pinErr=false;buildPin()},600)}
+}
+function pinBack(){ S.pinBuf=S.pinBuf.slice(0,-1); buildPin(); }
+
+// ── DASHBOARD ────────────────────────────────────────────────
+function openDash(){
+  S.tab='daily'; S.viewDate=todayKey(); S.wkOff=0; S.showFlagSearch=false;
+  document.getElementById('dash-title').textContent=S.isAdmin?'Admin':'Manager';
+  renderDashTabs(); renderDash(); show('dashboard');
+}
+function renderDashTabs(){
+  const tabs=[['daily','Daily'],['weekly','Weekly']]; if(S.isAdmin)tabs.push(['settings','Settings']);
+  document.getElementById('dash-tabs').innerHTML=tabs.map(([id,lbl])=>`<button class="tab${S.tab===id?' on':''}" onclick="setTab('${id}')">${lbl}</button>`).join('');
+}
+function setTab(t){ S.tab=t; S.showFlagSearch=false; renderDashTabs(); renderDash(); }
+function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else b.innerHTML=buildSettings(); }
+
+// ── DAILY VIEW ───────────────────────────────────────────────
+function buildDaily(){
+  const date=S.viewDate;
+  const dayPs=S.punches.filter(p=>dateKey(p.in)===date||(p.out&&dateKey(p.out)===date));
+  const eids=[...new Set([...dayPs.map(p=>p.eid),...Object.keys(S.flags).filter(k=>k.endsWith('_'+date)).map(k=>k.slice(0,-(date.length+1)))])];
+  const empCards=eids.length===0?`<div style="text-align:center;color:#6C6C70;margin-top:40px;font-size:14px">No activity on this date</div>`:eids.map(eid=>{
+    const name=S.roster.find(e=>e.id===eid)?.name||dayPs.find(p=>p.eid===eid)?.name||'Unknown';
+    const eps=dayPs.filter(p=>p.eid===eid).sort((a,b)=>new Date(a.in)-new Date(b.in));
+    const fl=getFlag(eid,date);
+    return`<div class="tc"><div class="th"><span>${name}</span><span id="hrs-${eid}" style="font-size:12px;font-weight:400;color:#6C6C70">${hoursD(netMs(eid,date))} hrs</span></div>${eps.map(p=>`<div class="pr"><div class="ml" style="margin-bottom:6px">${p.role} · ${p.loc}</div><div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><div style="font-size:10px;color:#6C6C70;margin-bottom:3px">IN</div><input type="time" value="${isoToT(p.in)}" onchange="editTime('${p.id}','in',this.value)"/></div><span style="color:#C7C7CC;margin-top:14px;flex-shrink:0">→</span><div style="flex:1"><div style="font-size:10px;color:#6C6C70;margin-bottom:3px">OUT</div>${p.out?`<input type="time" value="${isoToT(p.out)}" onchange="editTime('${p.id}','out',this.value)"/>`:`<div style="font-size:12px;color:#3B6D11;padding:6px 8px;border:1px solid #3B6D11;border-radius:8px;text-align:center">Active</div>`}</div></div></div>`).join('')}<div class="cr"><label class="cl"><input type="checkbox" ${fl.lunch?'checked':''} onchange="setFlag('${eid}','${date}','lunch',this.checked)" style="width:auto;margin:0"/>Deduct 30-min lunch</label></div><div class="cr"><label class="cl"><input type="checkbox" ${fl.ncns?'checked':''} onchange="setFlag('${eid}','${date}','ncns',this.checked)" style="width:auto;margin:0"/>No Call No Show</label><label class="cl"><input type="checkbox" ${fl.short?'checked':''} onchange="setFlag('${eid}','${date}','short',this.checked)" style="width:auto;margin:0">&lt;2hr Notice</label></div></div>`;
+  }).join('');
+  const flagSection=S.showFlagSearch?`<div class="card" style="margin-top:12px"><div style="font-weight:500;margin-bottom:8px">Flag absent employee</div><input id="fs" placeholder="Type name…" oninput="renderFlagSearch()" autocomplete="off" style="margin-top:0"/><div id="fsr" style="margin-top:8px"></div><button class="btn btn-ghost" onclick="S.showFlagSearch=false;renderDash()" style="margin-top:8px">Cancel</button></div>`:'';
+  return`<div class="wb"><button class="wn" onclick="changeDay(-1)"><i class="ti ti-chevron-left"></i></button><div style="text-align:center"><div style="font-weight:500;font-size:13px">${fmtDateDisp(date)}</div>${date===todayKey()?'<div style="font-size:11px;color:#BA7517;font-weight:500">Today</div>':''}</div><button class="wn" onclick="changeDay(1)" ${date>=todayKey()?'disabled style="opacity:.3"':''}><i class="ti ti-chevron-right"></i></button></div>${empCards}${flagSection}<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button onclick="S.showFlagSearch=!S.showFlagSearch;renderDash()" style="background:none;border:1px solid #C7C7CC;border-radius:8px;padding:7px 12px;font-size:13px;color:#6C6C70;cursor:pointer"><i class="ti ti-flag"></i> Flag absent employee</button>${S.isAdmin?`<button onclick="exportCSV('day')" style="background:#EF9F27;border:none;border-radius:8px;padding:7px 12px;font-size:13px;color:#412402;cursor:pointer"><i class="ti ti-download"></i> Export day</button>`:''}</div>`;
+}
+
+function renderFlagSearch(){
+  const q=(document.getElementById('fs')||{}).value||'';
+  const el=document.getElementById('fsr'); if(!el)return;
+  if(!q.trim()){el.innerHTML='';return}
+  const f=S.roster.filter(e=>e.name.toLowerCase().includes(q.toLowerCase())).slice(0,5);
+  el.innerHTML=f.length?f.map(e=>`<button onclick="addFlagEmp('${e.id}')" style="display:block;width:100%;padding:10px 12px;background:#F9F9FB;border:1px solid #E5E5EA;border-radius:8px;text-align:left;cursor:pointer;font-size:14px;font-family:inherit;color:#000;margin-bottom:4px">${e.name}</button>`).join(''):`<p style="font-size:13px;color:#6C6C70">No match</p>`;
+}
+function addFlagEmp(eid){ const k=`${eid}_${S.viewDate}`; if(!S.flags[k])S.flags[k]={}; dbSetFlag(eid,S.viewDate,S.flags[k]); S.showFlagSearch=false; renderDash(); }
+function changeDay(d){ const dt=new Date(S.viewDate+'T12:00:00'); dt.setDate(dt.getDate()+d); const nk=dateKey(dt.toISOString()); if(nk>todayKey())return; S.viewDate=nk; renderDash(); }
+function editTime(pid,field,t){
+  const punch=S.punches.find(p=>p.id===pid); if(!punch)return;
+  const base=(field==='in'?punch.in:(punch.out||punch.in)).split('T')[0];
+  const newIso=tToIso(t,base);
+  dbEditTime(pid,field,newIso);
+  const el=document.getElementById(`hrs-${punch.eid}`);
+  if(el)el.textContent=`${hoursD(netMs(punch.eid,S.viewDate))} hrs`;
+}
+function setFlag(eid,date,field,val){
+  const k=`${eid}_${date}`; if(!S.flags[k])S.flags[k]={}; S.flags[k][field]=val;
+  dbSetFlag(eid,date,S.flags[k]);
+  if(field==='lunch'){const el=document.getElementById(`hrs-${eid}`);if(el)el.textContent=`${hoursD(netMs(eid,date))} hrs`}
+}
+
+// ── WEEKLY VIEW ──────────────────────────────────────────────
+function buildWeekly(){
+  const ws=weekStart(S.wkOff),we=new Date(ws); we.setDate(we.getDate()+6);
+  const fmtWk=d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+  const wEnd=new Date(we.getTime()+864e5);
+  const wkp=S.punches.filter(p=>p.out&&new Date(p.in)>=ws&&new Date(p.in)<wEnd);
+  const sum={};
+  wkp.forEach(p=>{ if(!sum[p.eid])sum[p.eid]={name:p.name,roles:{},dates:new Set()}; const ms=new Date(p.out)-new Date(p.in); sum[p.eid].roles[p.role]=(sum[p.eid].roles[p.role]||0)+ms; sum[p.eid].dates.add(dateKey(p.in)); });
+  const empList=Object.entries(sum).sort(([,a],[,b])=>a.name.localeCompare(b.name));
+  return`<div class="wb"><button class="wn" onclick="S.wkOff--;renderDash()"><i class="ti ti-chevron-left"></i></button><div style="text-align:center"><div style="font-weight:500;font-size:14px">${fmtWk(ws)} – ${fmtWk(we)}</div>${S.wkOff===0?'<div style="font-size:11px;color:#BA7517;font-weight:500">Current week</div>':''}</div><button class="wn" onclick="if(S.wkOff<0){S.wkOff++;renderDash()}" ${S.wkOff>=0?'disabled style="opacity:.3"':''}><i class="ti ti-chevron-right"></i></button></div>${S.isAdmin?`<button onclick="exportCSV('week')" style="width:100%;padding:12px;border-radius:12px;border:none;background:#EF9F27;color:#412402;font-size:15px;font-weight:500;cursor:pointer;margin-bottom:14px"><i class="ti ti-download"></i> Export CSV</button>`:''} ${empList.length===0?`<div style="text-align:center;color:#6C6C70;font-size:14px;margin-top:30px">No completed shifts this week</div>`:''}${empList.map(([eid,data])=>{ const rawMs=Object.values(data.roles).reduce((a,b)=>a+b,0); const ld=[...data.dates].filter(dk=>getFlag(eid,dk).lunch).length*30*60*1000; const net=Math.max(0,rawMs-ld); const hasN=[...data.dates].some(dk=>getFlag(eid,dk).ncns); const hasS=[...data.dates].some(dk=>getFlag(eid,dk).short); return`<div class="tc"><div class="th"><span>${data.name}</span><div style="display:flex;align-items:center;gap:6px">${hasN?'<span style="font-size:10px;background:#FCEBEB;color:#A32D2D;padding:2px 6px;border-radius:4px;font-weight:500">NCNS</span>':''}${hasS?'<span style="font-size:10px;background:#FAEEDA;color:#BA7517;padding:2px 6px;border-radius:4px;font-weight:500">&lt;2hr</span>':''}<span style="font-size:12px;font-weight:400;color:#6C6C70">${hoursD(net)} hrs</span></div></div>${Object.entries(data.roles).map(([r,ms])=>`<div style="padding:6px 16px;display:flex;justify-content:space-between;font-size:13px;border-bottom:1px solid #E5E5EA"><span style="color:#6C6C70">${r}</span><span>${hoursD(ms)}</span></div>`).join('')}${ld>0?`<div style="padding:6px 16px;display:flex;justify-content:space-between;font-size:12px;border-bottom:1px solid #E5E5EA;color:#A32D2D"><span>Lunch deductions</span><span>-${hoursD(ld)}</span></div>`:''}<div class="tt"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:500"><span style="color:#3B6D11">Net total</span><span style="color:#173404">${hoursD(net)}</span></div></div></div>`; }).join('')}`;
+}
+
+// ── SETTINGS ─────────────────────────────────────────────────
+function buildSettings(){
+  return`<div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Employee roster <span style="font-weight:400;color:#6C6C70">(one per line)</span></div><textarea id="et" rows="10" style="font-family:monospace;font-size:13px;resize:vertical;line-height:1.6;margin-top:6px">${S.roster.map(e=>e.name).join('\n')}</textarea><div style="font-size:12px;color:#6C6C70;margin-top:4px">${S.roster.length} employees</div></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Roles <span style="font-weight:400;color:#6C6C70">(one per line)</span></div><textarea id="rt" rows="6" style="font-family:monospace;font-size:13px;resize:vertical;margin-top:6px">${S.config.roles.join('\n')}</textarea></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Locations <span style="font-weight:400;color:#6C6C70">(one per line)</span></div><textarea id="lt" rows="4" style="font-family:monospace;font-size:13px;resize:vertical;margin-top:6px">${S.config.locations.join('\n')}</textarea></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:8px">PINs</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div style="font-size:12px;color:#6C6C70">Manager PIN</div><input id="mp" type="text" inputmode="numeric" maxlength="8" value="${S.config.managerPin}" style="font-size:18px;letter-spacing:5px;font-family:monospace;margin-top:4px"/></div><div><div style="font-size:12px;color:#6C6C70">Admin PIN</div><input id="ap" type="text" inputmode="numeric" maxlength="8" value="${S.config.adminPin}" style="font-size:18px;letter-spacing:5px;font-family:monospace;margin-top:4px"/></div></div></div><button id="sv" onclick="saveSettings()" class="btn btn-amber" style="margin-top:4px">Save settings</button></div>`;
+}
+
+async function saveSettings(){
+  const names=(document.getElementById('et').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const roles=(document.getElementById('rt').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const locs=(document.getElementById('lt').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const mp=(document.getElementById('mp').value||'').replace(/\D/g,'')||'1234';
+  const ap=(document.getElementById('ap').value||'').replace(/\D/g,'')||'5678';
+  await Promise.all([
+    dbSaveRoster(names),
+    dbSaveConfig({roles:roles.length?roles:S.config.roles,locations:locs.length?locs:S.config.locations,managerPin:mp,adminPin:ap})
+  ]);
+  const b=document.getElementById('sv'); if(b){b.textContent='✓ Saved!';b.style.background='#3B6D11';b.style.color='#EAF3DE';setTimeout(()=>renderDash(),1500)}
+}
+
+// ── EXPORT ────────────────────────────────────────────────────
+function exportCSV(mode){
+  let punches,title;
+  if(mode==='day'){punches=S.punches.filter(p=>p.out&&dateKey(p.in)===S.viewDate);title=`day-${S.viewDate}`}
+  else{const ws=weekStart(S.wkOff),wEnd=new Date(ws);wEnd.setDate(wEnd.getDate()+7);punches=S.punches.filter(p=>p.out&&new Date(p.in)>=ws&&new Date(p.in)<wEnd);title=`week-${dateKey(ws.toISOString())}`}
+  const roles=S.config.roles,rows=[['Employee','Date','First In','Last Out',...roles,'Lunch Deducted','Net Total','NCNS','<2hr Notice']];
+  const ed={};
+  punches.forEach(p=>{const dk=dateKey(p.in),k=`${p.eid}|${dk}`;if(!ed[k])ed[k]={eid:p.eid,name:p.name,date:dk,punches:[],rm:{}};const ms=new Date(p.out)-new Date(p.in);ed[k].punches.push(p);ed[k].rm[p.role]=(ed[k].rm[p.role]||0)+ms});
+  Object.values(ed).sort((a,b)=>a.name.localeCompare(b.name)||a.date.localeCompare(b.date)).forEach(d=>{
+    const fl=getFlag(d.eid,d.date),tot=Object.values(d.rm).reduce((a,b)=>a+b,0),ded=fl.lunch?30*60*1000:0,net=Math.max(0,tot-ded);
+    const sp=[...d.punches].sort((a,b)=>new Date(a.in)-new Date(b.in)),lp=[...d.punches].sort((a,b)=>new Date(b.out)-new Date(a.out));
+    rows.push([d.name,d.date,fmtTime(sp[0].in),fmtTime(lp[0].out),...roles.map(r=>d.rm[r]?hoursD(d.rm[r]):''),fl.lunch?'-0.50':'',hoursD(net),fl.ncns?'Yes':'',fl.short?'Yes':'']);
+  });
+  const csv=rows.map(r=>r.map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=`timesheet-${title}.csv`;a.click();
+}
+
+// ── INIT ─────────────────────────────────────────────────────
+async function init(){
+  if(!SUPABASE_URL.startsWith('https://')){
+    document.getElementById('splash-msg').textContent='';
+    document.getElementById('error-msg').textContent='App not configured yet. Open timeclock.html in a text editor and add your Supabase URL and key at the top of the script.';
+    show('error-screen'); return;
+  }
+  try {
+    await loadAll();
+    setupRealtime();
+    const savedId=localStorage.getItem('tc_empId');
+    if(savedId&&S.roster.find(e=>e.id===savedId)){S.selId=savedId;S.isPersonalDevice=true;openEmp(savedId);}
+    else{goHome();}
+  } catch(err){
+    document.getElementById('error-msg').textContent='Could not connect to the database. Check your internet connection and try again.';
+    show('error-screen');
+  }
+}
+
+// ── INTERVALS ────────────────────────────────────────────────
+setInterval(()=>{
+  renderHdr();
+  const e=document.getElementById('el-val'); if(e){const a=getActive(S.selId);if(a)e.textContent=elapsed(a.in)}
+},30000);
+
+init();
+</script>
+</body>
+</html>
