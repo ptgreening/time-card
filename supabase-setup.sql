@@ -64,6 +64,15 @@ create policy "public_access" on tc_punches    for all to anon using (true) with
 create policy "public_access" on tc_day_flags  for all to anon using (true) with check (true);
 create policy "public_access" on tc_config     for all to anon using (true) with check (true);
 
+-- ── Table grants ──────────────────────────────────────────────
+--  RLS policies alone are not enough — Postgres also requires
+--  explicit GRANT on each table for the anon role.
+
+grant select, insert, update, delete on tc_employees  to anon;
+grant select, insert, update, delete on tc_punches    to anon;
+grant select, insert, update, delete on tc_day_flags  to anon;
+grant select, insert, update, delete on tc_config     to anon;
+
 -- ── Real-time ─────────────────────────────────────────────────
 --  Enables live updates when employees clock in across devices
 

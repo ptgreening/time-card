@@ -68,16 +68,17 @@ Supabase is a free database service. Your punch data lives here and syncs across
 
 Netlify hosts your file so everyone can access it from any device.
 
-1. Go to **[netlify.com](https://netlify.com)** and sign up (free)
-2. Once logged in, click **Add new site** → **Deploy manually**
-3. Drag and drop your `timeclock.html` file onto the upload area
-4. Wait about 10 seconds — your site is live!
-5. You'll see a URL like `coral-widget-abc123.netlify.app` — this is your app
+1. **Rename** `timeclock.html` to `index.html` — Netlify needs this name to serve the file at your root URL (e.g. `yoursite.netlify.app` instead of `yoursite.netlify.app/timeclock.html`)
+2. Go to **[netlify.com](https://netlify.com)** and sign up (free)
+3. Once logged in, click **Add new site** → **Deploy manually**
+4. Drag and drop your `index.html` file onto the upload area
+5. Wait about 10 seconds — your site is live!
+6. You'll see a URL like `coral-widget-abc123.netlify.app` — this is your app
 
 ### Customize the URL (optional but recommended)
-6. Click **Site configuration** → **Change site name**
-7. Enter something like `yourcompany-timeclock` → **Save**
-8. Your URL is now `yourcompany-timeclock.netlify.app`
+7. Click **Site configuration** → **Change site name**
+8. Enter something like `yourcompany-timeclock` → **Save**
+9. Your URL is now `yourcompany-timeclock.netlify.app`
 
 ---
 
@@ -136,7 +137,7 @@ Go to **[qr.io](https://qr.io)** or **[qrcode-monkey.com](https://www.qrcode-mon
 - If it keeps happening, check your Supabase project is still active (free projects don't expire, but can be paused after inactivity — unpause from the Supabase dashboard)
 
 **Updating the app later**
-- Edit `timeclock.html`, then drag it back to Netlify (same "Deploy manually" flow) — it replaces the old version automatically
+- Edit `timeclock.html`, rename a copy to `index.html`, then drag it back to Netlify (same "Deploy manually" flow) — it replaces the old version automatically
 
 ---
 

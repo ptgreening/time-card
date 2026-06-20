@@ -132,8 +132,8 @@
 // ═══════════════════════════════════════════════════════════════
 //  CONFIGURATION  —  replace these two values with yours
 // ═══════════════════════════════════════════════════════════════
-const SUPABASE_URL = 'YOUR_SUPABASE_URL';       // e.g. https://abcxyz.supabase.co
-const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY';  // from Settings → API → anon public key
+const SUPABASE_URL = 'https://cesumpaszxcaaglyadiw.supabase.co';       // e.g. https://abcxyz.supabase.co
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlc3VtcGFzenhjYWFnbHlhZGl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE5NjQ3MzIsImV4cCI6MjA5NzU0MDczMn0.72lV28ZErtemF8RInBRSqYo7GzZHLASWxB3mrs4yzuI';  // from Settings → API → anon public key
 // ═══════════════════════════════════════════════════════════════
 
 const { createClient } = supabase;
@@ -377,7 +377,7 @@ function buildPin(){
   const len=Math.max(S.config.managerPin.length,S.config.adminPin.length);
   const dots=document.getElementById('pin-dots'),pad=document.getElementById('pin-pad'); if(!dots||!pad)return;
   dots.innerHTML=Array.from({length:len}).map((_,i)=>`<div style="width:14px;height:14px;border-radius:50%;background:${i<S.pinBuf.length?(S.pinErr?'#E53935':'#EF9F27'):'#E5E5EA'}"></div>`).join('');
-  pad.innerHTML=['1','2','3','4','5','6','7','8','9','','0','⌫'].map(d=>`<button class="pin-key" onclick="${d==='⌫'?'pinBack()':d?`pinDigit('${d}')`:''}}">${d}</button>`).join('');
+  pad.innerHTML=['1','2','3','4','5','6','7','8','9','','0','⌫'].map(d=>`<button class="pin-key" onclick="${d==='⌫'?'pinBack()':d?`pinDigit('${d}')`:''}">` +d+'</button>').join('');
 }
 function pinDigit(d){
   S.pinBuf+=d; buildPin();
