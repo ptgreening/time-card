@@ -309,6 +309,10 @@ function renderEmpBody(){
   const weekHtml=totalMs>0?`<div class="card" style="margin-top:4px"><div class="ml" style="margin-bottom:10px">My week so far</div>${Object.entries(byRole).map(([r,ms])=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px"><span>${r}</span><span style="font-weight:500">${hoursD(ms)} hrs</span></div>`).join('')}<div style="border-top:1px solid #E5E5EA;margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;font-size:14px;font-weight:500"><span>Total</span><span>${hoursD(totalMs)} hrs</span></div></div>`:'';
   const notYouHtml=S.isPersonalDevice?`<div style="text-align:center;margin-top:16px"><button onclick="forgetDevice()" style="background:none;border:none;font-size:12px;color:#8E8E93;cursor:pointer;text-decoration:underline">Not ${emp.name}? Switch user</button></div>`:'';
 
+  if(!S.config.roles.length){
+    body.innerHTML=`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-alert-triangle"></i> No roles configured</div><div style="font-size:13px;color:#854F0B">An admin must add at least one role before employees can clock in.</div></div>`;
+    return;
+  }
   if(act){
     body.innerHTML=`<div class="active-card"><div class="ml" style="color:#3B6D11;margin-bottom:8px">Currently clocked in</div><div style="font-size:20px;font-weight:500;margin-bottom:2px">${act.role}</div><div style="font-size:13px;color:#6C6C70;margin-bottom:14px">${act.loc}</div><div style="display:flex;gap:24px"><div><div class="ml">Clock in</div><div style="font-size:15px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div><div><div class="ml">Elapsed</div><div id="el-val" style="font-size:15px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div></div></div>${S.switchMode?`<div class="card"><div style="font-weight:500;margin-bottom:4px">Switch to…</div><label>New role</label><select id="sw-r" style="margin-top:6px">${S.config.roles.map(r=>`<option>${r}</option>`).join('')}</select><label>Location</label><select id="sw-l" style="margin-top:6px">${S.config.locations.map(l=>`<option>${l}</option>`).join('')}</select><button class="btn btn-amber" onclick="doSwitch('${act.id}')">Confirm switch</button><button class="btn btn-ghost" onclick="S.switchMode=false;renderEmpBody()">Cancel</button></div>`:`<button class="btn btn-ghost" onclick="S.switchMode=true;renderEmpBody()"><i class="ti ti-refresh"></i> Switch role / location</button><button class="btn btn-red" onclick="doClockOut('${act.id}')">Clock out</button>`}${weekHtml}${notYouHtml}`;
   } else {
@@ -320,6 +324,7 @@ function renderEmpBody(){
 async function doClockIn(){
   const emp=S.roster.find(e=>e.id===S.selId); if(!emp||!canClockIn(emp.id).ok)return;
   const role=document.getElementById('ci-r').value, loc=document.getElementById('ci-l').value;
+  if(!S.config.roles.includes(role)||!S.config.locations.includes(loc)){showToast('⚠️ Invalid role or location');return;}
   const ok=await dbClockIn(emp.id,emp.name,role,loc);
   if(!ok){showToast('⚠️ Save failed — check connection');return}
   if(S.isPersonalDevice){ showToast(`Clocked in as ${role} ✓`); renderEmpBody(); }
@@ -335,6 +340,7 @@ async function doClockOut(pid){
 
 async function doSwitch(pid){
   const nr=document.getElementById('sw-r').value, nl=document.getElementById('sw-l').value;
+  if(!S.config.roles.includes(nr)||!S.config.locations.includes(nl)){showToast('⚠️ Invalid role or location');return;}
   await dbSwitchRole(pid,nr,nl); S.switchMode=false;
   if(S.isPersonalDevice){ showToast(`Switched to ${nr} ✓`); renderEmpBody(); }
   else { startAutoReset(`Switched to ${nr}`); }
@@ -461,9 +467,12 @@ async function saveSettings(){
   const locs=(document.getElementById('lt').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
   const mp=(document.getElementById('mp').value||'').replace(/\D/g,'')||'1234';
   const ap=(document.getElementById('ap').value||'').replace(/\D/g,'')||'5678';
+  if(!roles.length){showToast('⚠️ At least one role is required');return;}
+  if(!locs.length){showToast('⚠️ At least one location is required');return;}
+  if(mp===ap){showToast('⚠️ Manager and Admin PINs must differ');return;}
   await Promise.all([
     dbSaveRoster(names),
-    dbSaveConfig({roles:roles.length?roles:S.config.roles,locations:locs.length?locs:S.config.locations,managerPin:mp,adminPin:ap})
+    dbSaveConfig({roles,locations:locs,managerPin:mp,adminPin:ap})
   ]);
   const b=document.getElementById('sv'); if(b){b.textContent='✓ Saved!';b.style.background='#3B6D11';b.style.color='#EAF3DE';setTimeout(()=>renderDash(),1500)}
 }
