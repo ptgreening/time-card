@@ -149,3 +149,4 @@ Go to **[qr.io](https://qr.io)** or **[qrcode-monkey.com](https://www.qrcode-mon
 | Manager | Desktop/laptop | Daily view, edit times, flags |
 | Admin | Desktop/laptop | Everything + settings + CSV export |
 
+
