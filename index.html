@@ -54,8 +54,11 @@
     .warn { background: #FAEEDA; border-radius: 12px; border: 1px solid #FAC775; padding: 12px 16px; margin-bottom: 10px; }
     .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%); background: #1C1C1E; color: #fff; padding: 10px 20px; border-radius: 20px; font-size: 14px; font-weight: 500; z-index: 999; animation: fadeIn .2s; }
     @keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
-    /* Staff login hidden on phones/tablets — desktop only */
-    @media (max-width: 900px) { #staff-login-btn { display: none !important; } }
+    .chip { display: inline-block; font-size: 10px; padding: 2px 6px; border-radius: 4px; font-weight: 500; }
+    .chip-red { background: #FCEBEB; color: #A32D2D; }
+    .chip-amber { background: #FAEEDA; color: #BA7517; }
+    .chip-green { background: #EAF3DE; color: #3B6D11; }
+    .del { background: none; border: none; color: #A32D2D; font-size: 12px; cursor: pointer; font-family: inherit; padding: 0; }
     .spinner { width: 32px; height: 32px; border: 3px solid #E5E5EA; border-top-color: #EF9F27; border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
@@ -91,6 +94,20 @@
     <input id="search" placeholder="Your name…" oninput="renderSearch()" autocomplete="off" style="border-radius:12px;font-size:16px;padding:14px 16px;margin-top:0" />
   </div>
   <div class="body" style="padding-top:8px"><div id="search-results"></div></div>
+</div>
+
+<!-- EMPLOYEE CODE -->
+<div id="emp-code" class="screen">
+  <div class="hdr">
+    <button class="back" onclick="goHome()"><i class="ti ti-arrow-left"></i> Back</button>
+    <span id="ec-name" style="font-weight:500;font-size:17px"></span>
+    <span style="width:60px"></span>
+  </div>
+  <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px">
+    <div id="ec-msg" style="font-size:15px;color:#6C6C70;margin-bottom:28px">Enter your 6-digit code</div>
+    <div id="ec-dots" style="display:flex;gap:12px;margin-bottom:36px"></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:260px" id="ec-pad"></div>
+  </div>
 </div>
 
 <!-- EMPLOYEE -->
@@ -143,15 +160,18 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 const DEFS = {
   roles: ['Manager','Actor','Makeup Artist','Crowd Control','Carnival Crew'],
   locations: ['Main Site','Storage Lot A','Storage Lot B','Office'],
-  managerPin: '1234', adminPin: '5678'
+  managerPin: '1234', adminPin: '5678', lunchRoles: []
 };
 const S = {
   roster:[], punches:[], flags:{}, config:{...DEFS},
   selId:null, isAdmin:false, isPersonalDevice:false,
-  tab:'daily', viewDate:'', wkOff:0,
+  tab:'status', viewDate:'', wkOff:0,
   pinBuf:'', pinErr:false, switchMode:false,
+  empCodeBuf:'', empCodeErr:false, codeOk:false,
   showFlagSearch:false, resetTimer:null, resetInterval:null
 };
+function deviceType(){ return localStorage.getItem('tc_deviceType')||''; }
+function isSharedDevice(){ return deviceType()==='shared'; }
 
 // ── HELPERS ──────────────────────────────────────────────────
 const p2 = n => String(n).padStart(2,'0');
@@ -174,6 +194,18 @@ function netMs(eid,date){
   return Math.max(0, ms-(getFlag(eid,date).lunch ? 30*60*1000 : 0));
 }
 function normPunch(p){ return { id:p.id, eid:p.employee_id, name:p.employee_name, role:p.role, loc:p.location, in:p.clock_in, out:p.clock_out }; }
+function lunchRoles(){ return S.config.lunchRoles||[]; }
+function roleHasLunchBtn(role){ return lunchRoles().includes(role); }
+function grossMs(eid,date){ return S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.in)===date).reduce((s,p)=>s+(new Date(p.out)-new Date(p.in)),0); }
+function hadNonLunchRole(eid,date){ return S.punches.some(p=>p.eid===eid&&dateKey(p.in)===date&&!roleHasLunchBtn(p.role)); }
+function dayAlerts(eid,date){
+  const hrs=grossMs(eid,date)/3600000, fl=getFlag(eid,date);
+  return { mbp: hadNonLunchRole(eid,date)&&hrs>=6&&!fl.lunch, ot: hrs>=8 };
+}
+function alertChips(eid,date){
+  const a=dayAlerts(eid,date);
+  return `${a.mbp?'<span class="chip chip-red">MBP</span>':''}${a.ot?'<span class="chip chip-amber">OT</span>':''}`;
+}
 
 function showToast(msg, ms=2500){
   document.querySelectorAll('.toast').forEach(t=>t.remove());
@@ -189,10 +221,10 @@ async function loadAll(){
     db.from('tc_day_flags').select('*'),
     db.from('tc_config').select('*').eq('id',1).single()
   ]);
-  if(eR.data) S.roster = eR.data.map(e=>({id:e.id,name:e.name}));
+  if(eR.data) S.roster = eR.data.map(e=>({id:e.id,name:e.name,code:e.code||''}));
   if(pR.data) S.punches = pR.data.map(normPunch);
   if(fR.data){ S.flags={}; fR.data.forEach(f=>{ S.flags[`${f.employee_id}_${f.flag_date}`]={lunch:f.lunch,ncns:f.ncns,short:f.short_notice}; }); }
-  if(cR.data) S.config={roles:cR.data.roles,locations:cR.data.locations,managerPin:cR.data.manager_pin,adminPin:cR.data.admin_pin};
+  if(cR.data) S.config={roles:cR.data.roles,locations:cR.data.locations,managerPin:cR.data.manager_pin,adminPin:cR.data.admin_pin,lunchRoles:cR.data.lunch_roles||[]};
   if(eR.error||pR.error) throw new Error('Load failed');
 }
 
@@ -228,17 +260,25 @@ async function dbSetFlag(eid,date,flags){
   await db.from('tc_day_flags').upsert({id,employee_id:eid,flag_date:date,lunch:!!flags.lunch,ncns:!!flags.ncns,short_notice:!!flags.short});
   S.flags[`${eid}_${date}`]=flags;
 }
-async function dbSaveRoster(names){
-  const newRoster=names.map(name=>S.roster.find(e=>e.name===name)||{id:genId(),name});
+async function dbSaveRoster(entries){
+  const newRoster=entries.map(({name,code})=>{
+    const ex=S.roster.find(e=>e.name===name);
+    return { id:ex?ex.id:genId(), name, code };
+  });
   const newIds=new Set(newRoster.map(e=>e.id));
   const toDelete=S.roster.filter(e=>!newIds.has(e.id)).map(e=>e.id);
   if(toDelete.length) await db.from('tc_employees').delete().in('id',toDelete);
-  if(newRoster.length) await db.from('tc_employees').upsert(newRoster.map(e=>({id:e.id,name:e.name})));
+  if(newRoster.length) await db.from('tc_employees').upsert(newRoster.map(e=>({id:e.id,name:e.name,code:e.code||null})));
   S.roster=newRoster;
 }
 async function dbSaveConfig(cfg){
-  await db.from('tc_config').update({roles:cfg.roles,locations:cfg.locations,manager_pin:cfg.managerPin,admin_pin:cfg.adminPin}).eq('id',1);
+  await db.from('tc_config').update({roles:cfg.roles,locations:cfg.locations,manager_pin:cfg.managerPin,admin_pin:cfg.adminPin,lunch_roles:cfg.lunchRoles}).eq('id',1);
   S.config=cfg;
+}
+async function dbDeletePunch(pid){
+  const {error}=await db.from('tc_punches').delete().eq('id',pid);
+  if(!error) S.punches=S.punches.filter(p=>p.id!==pid);
+  return !error;
 }
 
 function setupRealtime(){
@@ -246,8 +286,9 @@ function setupRealtime(){
     .on('postgres_changes',{event:'*',schema:'public',table:'tc_punches'},payload=>{
       if(payload.eventType==='INSERT'&&!S.punches.find(p=>p.id===payload.new.id)) S.punches.push(normPunch(payload.new));
       else if(payload.eventType==='UPDATE') S.punches=S.punches.map(p=>p.id===payload.new.id?normPunch(payload.new):p);
+      else if(payload.eventType==='DELETE') S.punches=S.punches.filter(p=>p.id!==payload.old.id);
       const sc=document.querySelector('.screen.on');
-      if(sc?.id==='dashboard'&&S.tab==='daily') renderDash();
+      if(sc?.id==='dashboard'&&(S.tab==='daily'||S.tab==='status')) renderDash();
     })
     .subscribe();
 }
@@ -277,10 +318,36 @@ function renderSearch(){
   el.innerHTML=`<div style="border-radius:12px;overflow:hidden;border:1px solid #E5E5EA">${f.map(e=>`<button class="emp-row" onclick="openEmp('${e.id}')"><i class="ti ti-user" style="font-size:16px;color:#C7C7CC;margin-right:12px"></i>${e.name}<i class="ti ti-chevron-right" style="font-size:14px;color:#C7C7CC;margin-left:auto"></i></button>`).join('')}</div>`;
 }
 
-// ── EMPLOYEE SCREEN ──────────────────────────────────────────
+// ── EMPLOYEE CODE ────────────────────────────────────────────
 function openEmp(eid){
-  S.selId=eid; S.switchMode=false;
-  const emp=S.roster.find(e=>e.id===eid);
+  const emp=S.roster.find(e=>e.id===eid); if(!emp)return;
+  S.selId=eid; S.switchMode=false; S.codeOk=false;
+  if(!emp.code){ S.codeOk=true; showEmpScreen(); return; }
+  S.empCodeBuf=''; S.empCodeErr=false;
+  document.getElementById('ec-name').textContent=emp.name;
+  document.getElementById('ec-msg').textContent='Enter your 6-digit code';
+  buildEmpCode(); show('emp-code');
+}
+function buildEmpCode(){
+  const dots=document.getElementById('ec-dots'),pad=document.getElementById('ec-pad'); if(!dots||!pad)return;
+  dots.innerHTML=Array.from({length:6}).map((_,i)=>`<div style="width:14px;height:14px;border-radius:50%;background:${i<S.empCodeBuf.length?(S.empCodeErr?'#E53935':'#EF9F27'):'#E5E5EA'}"></div>`).join('');
+  pad.innerHTML=['1','2','3','4','5','6','7','8','9','','0','⌫'].map(d=>`<button class="pin-key" onclick="${d==='⌫'?'ecBack()':d?`ecDigit('${d}')`:''}">`+d+'</button>').join('');
+}
+function ecDigit(d){
+  if(S.empCodeBuf.length>=6)return;
+  S.empCodeBuf+=d; buildEmpCode();
+  if(S.empCodeBuf.length<6)return;
+  const emp=S.roster.find(e=>e.id===S.selId);
+  if(emp&&S.empCodeBuf===emp.code){ S.codeOk=true; setTimeout(showEmpScreen,100); return; }
+  S.empCodeErr=true; buildEmpCode();
+  document.getElementById('ec-msg').textContent='Incorrect code — try again';
+  setTimeout(()=>{S.empCodeBuf='';S.empCodeErr=false;buildEmpCode()},700);
+}
+function ecBack(){ S.empCodeBuf=S.empCodeBuf.slice(0,-1); buildEmpCode(); }
+
+// ── EMPLOYEE SCREEN ──────────────────────────────────────────
+function showEmpScreen(){
+  const emp=S.roster.find(e=>e.id===S.selId);
   document.getElementById('emp-hdr').textContent=emp?emp.name:'';
   renderEmpBody(); show('employee');
 }
@@ -308,17 +375,45 @@ function renderEmpBody(){
   const{byRole,totalMs}=weekSummary(emp.id);
   const weekHtml=totalMs>0?`<div class="card" style="margin-top:4px"><div class="ml" style="margin-bottom:10px">My week so far</div>${Object.entries(byRole).map(([r,ms])=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px"><span>${r}</span><span style="font-weight:500">${hoursD(ms)} hrs</span></div>`).join('')}<div style="border-top:1px solid #E5E5EA;margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;font-size:14px;font-weight:500"><span>Total</span><span>${hoursD(totalMs)} hrs</span></div></div>`:'';
   const notYouHtml=S.isPersonalDevice?`<div style="text-align:center;margin-top:16px"><button onclick="forgetDevice()" style="background:none;border:none;font-size:12px;color:#8E8E93;cursor:pointer;text-decoration:underline">Not ${emp.name}? Switch user</button></div>`:'';
+  const mainBtn=`<button class="btn btn-ghost" onclick="cancelAndGoHome()" style="margin-top:14px"><i class="ti ti-home"></i> Return to main</button>`;
+  const statusHtml=buildMyStatus(emp.id);
 
   if(!S.config.roles.length){
     body.innerHTML=`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-alert-triangle"></i> No roles configured</div><div style="font-size:13px;color:#854F0B">An admin must add at least one role before employees can clock in.</div></div>`;
     return;
   }
   if(act){
-    body.innerHTML=`<div class="active-card"><div class="ml" style="color:#3B6D11;margin-bottom:8px">Currently clocked in</div><div style="font-size:20px;font-weight:500;margin-bottom:2px">${act.role}</div><div style="font-size:13px;color:#6C6C70;margin-bottom:14px">${act.loc}</div><div style="display:flex;gap:24px"><div><div class="ml">Clock in</div><div style="font-size:15px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div><div><div class="ml">Elapsed</div><div id="el-val" style="font-size:15px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div></div></div>${S.switchMode?`<div class="card"><div style="font-weight:500;margin-bottom:4px">Switch to…</div><label>New role</label><select id="sw-r" style="margin-top:6px">${S.config.roles.map(r=>`<option>${r}</option>`).join('')}</select><label>Location</label><select id="sw-l" style="margin-top:6px">${S.config.locations.map(l=>`<option>${l}</option>`).join('')}</select><button class="btn btn-amber" onclick="doSwitch('${act.id}')">Confirm switch</button><button class="btn btn-ghost" onclick="S.switchMode=false;renderEmpBody()">Cancel</button></div>`:`<button class="btn btn-ghost" onclick="S.switchMode=true;renderEmpBody()"><i class="ti ti-refresh"></i> Switch role / location</button><button class="btn btn-red" onclick="doClockOut('${act.id}')">Clock out</button>`}${weekHtml}${notYouHtml}`;
+    const canLunch=roleHasLunchBtn(act.role)&&!getFlag(emp.id,todayKey()).lunch;
+    const lunchBtn=canLunch?`<button class="btn btn-amber" onclick="takeLunch()"><i class="ti ti-tools-kitchen-2"></i> Take lunch (30 min)</button>`:'';
+    body.innerHTML=`<div class="active-card"><div class="ml" style="color:#3B6D11;margin-bottom:8px">Currently clocked in</div><div style="font-size:20px;font-weight:500;margin-bottom:2px">${act.role}</div><div style="font-size:13px;color:#6C6C70;margin-bottom:14px">${act.loc}</div><div style="display:flex;gap:24px"><div><div class="ml">Clock in</div><div style="font-size:15px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div><div><div class="ml">Elapsed</div><div id="el-val" style="font-size:15px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div></div></div>${S.switchMode?`<div class="card"><div style="font-weight:500;margin-bottom:4px">Switch to…</div><label>New role</label><select id="sw-r" style="margin-top:6px">${S.config.roles.map(r=>`<option>${r}</option>`).join('')}</select><label>Location</label><select id="sw-l" style="margin-top:6px">${S.config.locations.map(l=>`<option>${l}</option>`).join('')}</select><button class="btn btn-amber" onclick="doSwitch('${act.id}')">Confirm switch</button><button class="btn btn-ghost" onclick="S.switchMode=false;renderEmpBody()">Cancel</button></div>`:`${lunchBtn}<button class="btn btn-ghost" onclick="S.switchMode=true;renderEmpBody()"><i class="ti ti-refresh"></i> Switch role / location</button><button class="btn btn-red" onclick="doClockOut('${act.id}')">Clock out</button>`}${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
   } else {
     const chk=canClockIn(emp.id);
-    body.innerHTML=`${!chk.ok?`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-clock"></i> Break in progress</div><div style="font-size:13px;color:#854F0B">You can clock back in after <strong>${chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</strong></div></div>`:''}<div class="card"><div style="font-size:14px;color:#6C6C70;margin-bottom:4px">Select your role and location</div><label>Role</label><select id="ci-r" style="margin-top:6px">${S.config.roles.map(r=>`<option>${r}</option>`).join('')}</select><label>Location</label><select id="ci-l" style="margin-top:6px">${S.config.locations.map(l=>`<option>${l}</option>`).join('')}</select></div><button class="btn btn-green" onclick="doClockIn()" ${!chk.ok?'disabled style="opacity:.4;cursor:not-allowed"':''}>Clock in</button>${weekHtml}${notYouHtml}`;
+    body.innerHTML=`${!chk.ok?`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-clock"></i> Break in progress</div><div style="font-size:13px;color:#854F0B">You can clock back in after <strong>${chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</strong></div></div>`:''}<div class="card"><div style="font-size:14px;color:#6C6C70;margin-bottom:4px">Select your role and location</div><label>Role</label><select id="ci-r" style="margin-top:6px">${S.config.roles.map(r=>`<option>${r}</option>`).join('')}</select><label>Location</label><select id="ci-l" style="margin-top:6px">${S.config.locations.map(l=>`<option>${l}</option>`).join('')}</select></div><button class="btn btn-green" onclick="doClockIn()" ${!chk.ok?'disabled style="opacity:.4;cursor:not-allowed"':''}>Clock in</button>${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
   }
+}
+
+function buildMyStatus(eid){
+  const today=todayKey(), act=getActive(eid), fl=getFlag(eid,today);
+  const eps=S.punches.filter(p=>p.eid===eid&&dateKey(p.in)===today).sort((a,b)=>new Date(a.in)-new Date(b.in));
+  if(!eps.length&&!fl.lunch) return `<div class="card" style="margin-top:4px"><div class="ml" style="margin-bottom:8px">Today's status</div><div style="font-size:14px;color:#6C6C70">No activity yet today.</div></div>`;
+  const chk=canClockIn(eid);
+  const rows=[];
+  if(eps.length) rows.push(['First clock in', fmtTime(eps[0].in)]);
+  if(act) rows.push(['Current shift', `${act.role} · ${act.loc}`]);
+  else if(eps.length){ const last=eps[eps.length-1]; if(last.out) rows.push(['Last clock out', fmtTime(last.out)]); }
+  rows.push(['Lunch', fl.lunch?'Taken (30 min deducted)':'Not taken']);
+  rows.push(['Hours today', `${hoursD(netMs(eid,today))} hrs`]);
+  if(!act&&!chk.ok) rows.push(['Can clock back in', chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})]);
+  else if(!act) rows.push(['Can clock back in','Now']);
+  return `<div class="card" style="margin-top:4px"><div class="ml" style="margin-bottom:10px">Today's status</div>${rows.map(([k,v])=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:5px;gap:12px"><span style="color:#6C6C70">${k}</span><span style="font-weight:500;text-align:right">${v}</span></div>`).join('')}</div>`;
+}
+
+async function takeLunch(){
+  const eid=S.selId, today=todayKey();
+  if(getFlag(eid,today).lunch){showToast('Lunch already taken today');return}
+  const k=`${eid}_${today}`; const f={...(S.flags[k]||{}),lunch:true};
+  await dbSetFlag(eid,today,f);
+  showToast('Lunch recorded — 30 min deducted ✓'); renderEmpBody();
 }
 
 async function doClockIn(){
@@ -328,6 +423,7 @@ async function doClockIn(){
   const ok=await dbClockIn(emp.id,emp.name,role,loc);
   if(!ok){showToast('⚠️ Save failed — check connection');return}
   if(S.isPersonalDevice){ showToast(`Clocked in as ${role} ✓`); renderEmpBody(); }
+  else if(isSharedDevice()){ finishAndGoHome(`Clocked in as ${role} ✓`); }
   else { offerRememberMe(emp,role); }
 }
 
@@ -335,7 +431,7 @@ async function doClockOut(pid){
   const ok=await dbClockOut(pid);
   if(!ok){showToast('⚠️ Save failed — check connection');return}
   if(S.isPersonalDevice){ showToast('Clocked out ✓'); renderEmpBody(); }
-  else { startAutoReset('Clocked out — have a great day!'); }
+  else { finishAndGoHome('Clocked out — have a great day!'); }
 }
 
 async function doSwitch(pid){
@@ -343,7 +439,7 @@ async function doSwitch(pid){
   if(!S.config.roles.includes(nr)||!S.config.locations.includes(nl)){showToast('⚠️ Invalid role or location');return;}
   await dbSwitchRole(pid,nr,nl); S.switchMode=false;
   if(S.isPersonalDevice){ showToast(`Switched to ${nr} ✓`); renderEmpBody(); }
-  else { startAutoReset(`Switched to ${nr}`); }
+  else { finishAndGoHome(`Switched to ${nr} ✓`); }
 }
 
 function offerRememberMe(emp,role){
@@ -353,9 +449,11 @@ function offerRememberMe(emp,role){
     <div style="font-size:20px;font-weight:500;margin-bottom:6px">Clocked in as ${role}</div>
     <div style="font-size:14px;color:#6C6C70;margin-bottom:28px">Is this your personal phone?</div>
     <button onclick="rememberMe()" class="btn btn-green" style="max-width:280px;margin-top:0">Yes — save my name to this phone</button>
-    <button onclick="startAutoReset('')" class="btn btn-ghost" style="max-width:280px">No — shared / tablet device</button>
+    <button onclick="markShared()" class="btn btn-ghost" style="max-width:280px">No — shared / tablet device</button>
   </div>`;
 }
+
+function markShared(){ localStorage.setItem('tc_deviceType','shared'); finishAndGoHome(''); }
 
 function rememberMe(){
   localStorage.setItem('tc_empId',S.selId);
@@ -366,17 +464,7 @@ function forgetDevice(){
   localStorage.removeItem('tc_empId'); S.isPersonalDevice=false; S.selId=null; goHome();
 }
 
-function startAutoReset(msg){
-  const body=document.getElementById('emp-body'); if(!body)return;
-  let n=4;
-  body.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;text-align:center;padding:32px">
-    <i class="ti ti-circle-check" style="font-size:56px;color:#3B6D11;display:block;margin-bottom:20px"></i>
-    ${msg?`<div style="font-size:20px;font-weight:500;margin-bottom:8px">${msg}</div>`:''}
-    <div id="cd" style="font-size:14px;color:#6C6C70;margin-bottom:24px">Returning in ${n}…</div>
-    <button onclick="cancelAndGoHome()" style="background:none;border:1px solid #C7C7CC;border-radius:8px;padding:8px 18px;font-size:14px;color:#6C6C70;cursor:pointer">Done now</button>
-  </div>`;
-  S.resetInterval=setInterval(()=>{ n--; const e=document.getElementById('cd'); if(e)e.textContent=`Returning in ${n}…`; if(n<=0){clearReset();goHome();} },1000);
-}
+function finishAndGoHome(msg){ clearReset(); goHome(); if(msg) showToast(msg,3000); }
 
 // ── PIN ──────────────────────────────────────────────────────
 function buildPin(){
@@ -395,16 +483,35 @@ function pinBack(){ S.pinBuf=S.pinBuf.slice(0,-1); buildPin(); }
 
 // ── DASHBOARD ────────────────────────────────────────────────
 function openDash(){
-  S.tab='daily'; S.viewDate=todayKey(); S.wkOff=0; S.showFlagSearch=false;
+  S.tab='status'; S.viewDate=todayKey(); S.wkOff=0; S.showFlagSearch=false;
   document.getElementById('dash-title').textContent=S.isAdmin?'Admin':'Manager';
   renderDashTabs(); renderDash(); show('dashboard');
 }
 function renderDashTabs(){
-  const tabs=[['daily','Daily'],['weekly','Weekly']]; if(S.isAdmin)tabs.push(['settings','Settings']);
+  const tabs=[['status','Status'],['daily','Daily'],['weekly','Weekly']]; if(S.isAdmin)tabs.push(['settings','Settings']);
   document.getElementById('dash-tabs').innerHTML=tabs.map(([id,lbl])=>`<button class="tab${S.tab===id?' on':''}" onclick="setTab('${id}')">${lbl}</button>`).join('');
 }
 function setTab(t){ S.tab=t; S.showFlagSearch=false; renderDashTabs(); renderDash(); }
-function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else b.innerHTML=buildSettings(); }
+function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; if(S.tab==='status')b.innerHTML=buildStatus(); else if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else b.innerHTML=buildSettings(); }
+
+// ── QUICK STATUS (live) ──────────────────────────────────────
+function buildStatus(){
+  const today=todayKey();
+  const active=S.punches.filter(p=>!p.out).sort((a,b)=>new Date(a.in)-new Date(b.in));
+  const header=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div><div style="font-weight:500;font-size:15px">Clocked in now</div><div style="font-size:12px;color:#6C6C70">${active.length} ${active.length===1?'person':'people'} on the clock</div></div><button class="wn" onclick="renderDash()" style="font-size:13px">Refresh</button></div>`;
+  if(!active.length) return header+`<div style="text-align:center;color:#6C6C70;margin-top:40px;font-size:14px">Nobody is clocked in right now</div>`;
+  const byLoc={};
+  active.forEach(p=>{ (byLoc[p.loc]=byLoc[p.loc]||[]).push(p); });
+  const blocks=Object.entries(byLoc).sort(([a],[b])=>a.localeCompare(b)).map(([loc,ps])=>{
+    const rows=ps.sort((a,b)=>a.name.localeCompare(b.name)).map(p=>{
+      const fl=getFlag(p.eid,today);
+      const lunch=fl.lunch?'<span class="chip chip-green">Lunch taken</span>':(roleHasLunchBtn(p.role)?'<span class="chip chip-amber">No lunch yet</span>':'<span class="chip chip-amber">Lunch not logged</span>');
+      return `<div class="pr"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><span style="font-weight:500;font-size:15px">${p.name}</span><span style="font-size:13px;color:#6C6C70">${elapsed(p.in)}</span></div><div style="font-size:13px;color:#6C6C70;margin-top:2px">${p.role} · in at ${fmtTime(p.in)}</div><div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${lunch}${alertChips(p.eid,today)}</div></div>`;
+    }).join('');
+    return `<div class="tc"><div class="th"><span>${loc}</span><span style="font-size:12px;font-weight:400;color:#6C6C70">${ps.length}</span></div>${rows}</div>`;
+  }).join('');
+  return header+blocks;
+}
 
 // ── DAILY VIEW ───────────────────────────────────────────────
 function buildDaily(){
@@ -415,7 +522,7 @@ function buildDaily(){
     const name=S.roster.find(e=>e.id===eid)?.name||dayPs.find(p=>p.eid===eid)?.name||'Unknown';
     const eps=dayPs.filter(p=>p.eid===eid).sort((a,b)=>new Date(a.in)-new Date(b.in));
     const fl=getFlag(eid,date);
-    return`<div class="tc"><div class="th"><span>${name}</span><span id="hrs-${eid}" style="font-size:12px;font-weight:400;color:#6C6C70">${hoursD(netMs(eid,date))} hrs</span></div>${eps.map(p=>`<div class="pr"><div class="ml" style="margin-bottom:6px">${p.role} · ${p.loc}</div><div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><div style="font-size:10px;color:#6C6C70;margin-bottom:3px">IN</div><input type="time" value="${isoToT(p.in)}" onchange="editTime('${p.id}','in',this.value)"/></div><span style="color:#C7C7CC;margin-top:14px;flex-shrink:0">→</span><div style="flex:1"><div style="font-size:10px;color:#6C6C70;margin-bottom:3px">OUT</div>${p.out?`<input type="time" value="${isoToT(p.out)}" onchange="editTime('${p.id}','out',this.value)"/>`:`<div style="font-size:12px;color:#3B6D11;padding:6px 8px;border:1px solid #3B6D11;border-radius:8px;text-align:center">Active</div>`}</div></div></div>`).join('')}<div class="cr"><label class="cl"><input type="checkbox" ${fl.lunch?'checked':''} onchange="setFlag('${eid}','${date}','lunch',this.checked)" style="width:auto;margin:0"/>Deduct 30-min lunch</label></div><div class="cr"><label class="cl"><input type="checkbox" ${fl.ncns?'checked':''} onchange="setFlag('${eid}','${date}','ncns',this.checked)" style="width:auto;margin:0"/>No Call No Show</label><label class="cl"><input type="checkbox" ${fl.short?'checked':''} onchange="setFlag('${eid}','${date}','short',this.checked)" style="width:auto;margin:0">&lt;2hr Notice</label></div></div>`;
+    return`<div class="tc"><div class="th"><span>${name}</span><div style="display:flex;align-items:center;gap:6px">${alertChips(eid,date)}<span id="hrs-${eid}" style="font-size:12px;font-weight:400;color:#6C6C70">${hoursD(netMs(eid,date))} hrs</span></div></div>${eps.map(p=>`<div class="pr"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="ml">${p.role} · ${p.loc}</div>${S.isAdmin?`<button class="del" onclick="deletePunch('${p.id}')"><i class="ti ti-trash"></i> Delete</button>`:''}</div><div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><div style="font-size:10px;color:#6C6C70;margin-bottom:3px">IN</div><input type="time" value="${isoToT(p.in)}" onchange="editTime('${p.id}','in',this.value)"/></div><span style="color:#C7C7CC;margin-top:14px;flex-shrink:0">→</span><div style="flex:1"><div style="font-size:10px;color:#6C6C70;margin-bottom:3px">OUT</div>${p.out?`<input type="time" value="${isoToT(p.out)}" onchange="editTime('${p.id}','out',this.value)"/>`:`<div style="font-size:12px;color:#3B6D11;padding:6px 8px;border:1px solid #3B6D11;border-radius:8px;text-align:center">Active</div>`}</div></div></div>`).join('')}<div class="cr"><label class="cl"><input type="checkbox" ${fl.lunch?'checked':''} onchange="setFlag('${eid}','${date}','lunch',this.checked)" style="width:auto;margin:0"/>Deduct 30-min lunch</label></div><div class="cr"><label class="cl"><input type="checkbox" ${fl.ncns?'checked':''} onchange="setFlag('${eid}','${date}','ncns',this.checked)" style="width:auto;margin:0"/>No Call No Show</label><label class="cl"><input type="checkbox" ${fl.short?'checked':''} onchange="setFlag('${eid}','${date}','short',this.checked)" style="width:auto;margin:0">&lt;2hr Notice</label></div></div>`;
   }).join('');
   const flagSection=S.showFlagSearch?`<div class="card" style="margin-top:12px"><div style="font-weight:500;margin-bottom:8px">Flag absent employee</div><input id="fs" placeholder="Type name…" oninput="renderFlagSearch()" autocomplete="off" style="margin-top:0"/><div id="fsr" style="margin-top:8px"></div><button class="btn btn-ghost" onclick="S.showFlagSearch=false;renderDash()" style="margin-top:8px">Cancel</button></div>`:'';
   return`<div class="wb"><button class="wn" onclick="changeDay(-1)">&#8592; Prev</button><div style="text-align:center"><div style="font-weight:500;font-size:13px">${fmtDateDisp(date)}</div>${date===todayKey()?'<div style="font-size:11px;color:#BA7517;font-weight:500">Today</div>':''}</div><button class="wn" onclick="changeDay(1)" ${date>=todayKey()?'disabled style="opacity:.3"':''}>Next &#8594;</button></div>${empCards}${flagSection}<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button onclick="S.showFlagSearch=!S.showFlagSearch;renderDash()" style="background:none;border:1px solid #C7C7CC;border-radius:8px;padding:7px 12px;font-size:13px;color:#6C6C70;cursor:pointer"><i class="ti ti-flag"></i> Flag absent employee</button>${S.isAdmin?`<button onclick="exportCSV('day')" style="background:#EF9F27;border:none;border-radius:8px;padding:7px 12px;font-size:13px;color:#412402;cursor:pointer"><i class="ti ti-download"></i> Export day</button>`:''}</div>`;
@@ -427,6 +534,13 @@ function renderFlagSearch(){
   if(!q.trim()){el.innerHTML='';return}
   const f=S.roster.filter(e=>e.name.toLowerCase().includes(q.toLowerCase())).slice(0,5);
   el.innerHTML=f.length?f.map(e=>`<button onclick="addFlagEmp('${e.id}')" style="display:block;width:100%;padding:10px 12px;background:#F9F9FB;border:1px solid #E5E5EA;border-radius:8px;text-align:left;cursor:pointer;font-size:14px;font-family:inherit;color:#000;margin-bottom:4px">${e.name}</button>`).join(''):`<p style="font-size:13px;color:#6C6C70">No match</p>`;
+}
+async function deletePunch(pid){
+  const p=S.punches.find(x=>x.id===pid); if(!p)return;
+  const label=`${p.name} — ${p.role} at ${fmtTime(p.in)}${p.out?' to '+fmtTime(p.out):' (still active)'}`;
+  if(!confirm(`Delete this entry?\n\n${label}\n\nThis cannot be undone.`))return;
+  const ok=await dbDeletePunch(pid);
+  showToast(ok?'Entry deleted ✓':'⚠️ Delete failed'); renderDash();
 }
 function addFlagEmp(eid){ const k=`${eid}_${S.viewDate}`; if(!S.flags[k])S.flags[k]={}; dbSetFlag(eid,S.viewDate,S.flags[k]); S.showFlagSearch=false; renderDash(); }
 function changeDay(d){ const dt=new Date(S.viewDate+'T12:00:00'); dt.setDate(dt.getDate()+d); const nk=dateKey(dt.toISOString()); if(nk>todayKey())return; S.viewDate=nk; renderDash(); }
@@ -453,26 +567,45 @@ function buildWeekly(){
   const sum={};
   wkp.forEach(p=>{ if(!sum[p.eid])sum[p.eid]={name:p.name,roles:{},dates:new Set()}; const ms=new Date(p.out)-new Date(p.in); sum[p.eid].roles[p.role]=(sum[p.eid].roles[p.role]||0)+ms; sum[p.eid].dates.add(dateKey(p.in)); });
   const empList=Object.entries(sum).sort(([,a],[,b])=>a.name.localeCompare(b.name));
-  return`<div class="wb"><button class="wn" onclick="S.wkOff--;renderDash()">&#8592; Prev</button><div style="text-align:center"><div style="font-weight:500;font-size:14px">${fmtWk(ws)} – ${fmtWk(we)}</div>${S.wkOff===0?'<div style="font-size:11px;color:#BA7517;font-weight:500">Current week</div>':''}</div><button class="wn" onclick="if(S.wkOff<0){S.wkOff++;renderDash()}" ${S.wkOff>=0?'disabled style="opacity:.3"':''}>Next &#8594;</button></div>${S.isAdmin?`<button onclick="exportCSV('week')" style="width:100%;padding:12px;border-radius:12px;border:none;background:#EF9F27;color:#412402;font-size:15px;font-weight:500;cursor:pointer;margin-bottom:14px"><i class="ti ti-download"></i> Export CSV</button>`:''} ${empList.length===0?`<div style="text-align:center;color:#6C6C70;font-size:14px;margin-top:30px">No completed shifts this week</div>`:''}${empList.map(([eid,data])=>{ const rawMs=Object.values(data.roles).reduce((a,b)=>a+b,0); const ld=[...data.dates].filter(dk=>getFlag(eid,dk).lunch).length*30*60*1000; const net=Math.max(0,rawMs-ld); const hasN=[...data.dates].some(dk=>getFlag(eid,dk).ncns); const hasS=[...data.dates].some(dk=>getFlag(eid,dk).short); return`<div class="tc"><div class="th"><span>${data.name}</span><div style="display:flex;align-items:center;gap:6px">${hasN?'<span style="font-size:10px;background:#FCEBEB;color:#A32D2D;padding:2px 6px;border-radius:4px;font-weight:500">NCNS</span>':''}${hasS?'<span style="font-size:10px;background:#FAEEDA;color:#BA7517;padding:2px 6px;border-radius:4px;font-weight:500">&lt;2hr</span>':''}<span style="font-size:12px;font-weight:400;color:#6C6C70">${hoursD(net)} hrs</span></div></div>${Object.entries(data.roles).map(([r,ms])=>`<div style="padding:6px 16px;display:flex;justify-content:space-between;font-size:13px;border-bottom:1px solid #E5E5EA"><span style="color:#6C6C70">${r}</span><span>${hoursD(ms)}</span></div>`).join('')}${ld>0?`<div style="padding:6px 16px;display:flex;justify-content:space-between;font-size:12px;border-bottom:1px solid #E5E5EA;color:#A32D2D"><span>Lunch deductions</span><span>-${hoursD(ld)}</span></div>`:''}<div class="tt"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:500"><span style="color:#3B6D11">Net total</span><span style="color:#173404">${hoursD(net)}</span></div></div></div>`; }).join('')}`;
+  return`<div class="wb"><button class="wn" onclick="S.wkOff--;renderDash()">&#8592; Prev</button><div style="text-align:center"><div style="font-weight:500;font-size:14px">${fmtWk(ws)} – ${fmtWk(we)}</div>${S.wkOff===0?'<div style="font-size:11px;color:#BA7517;font-weight:500">Current week</div>':''}</div><button class="wn" onclick="if(S.wkOff<0){S.wkOff++;renderDash()}" ${S.wkOff>=0?'disabled style="opacity:.3"':''}>Next &#8594;</button></div>${S.isAdmin?`<button onclick="exportCSV('week')" style="width:100%;padding:12px;border-radius:12px;border:none;background:#EF9F27;color:#412402;font-size:15px;font-weight:500;cursor:pointer;margin-bottom:14px"><i class="ti ti-download"></i> Export CSV</button>`:''} ${empList.length===0?`<div style="text-align:center;color:#6C6C70;font-size:14px;margin-top:30px">No completed shifts this week</div>`:''}${empList.map(([eid,data])=>{ const rawMs=Object.values(data.roles).reduce((a,b)=>a+b,0); const ld=[...data.dates].filter(dk=>getFlag(eid,dk).lunch).length*30*60*1000; const net=Math.max(0,rawMs-ld); const hasN=[...data.dates].some(dk=>getFlag(eid,dk).ncns); const hasS=[...data.dates].some(dk=>getFlag(eid,dk).short); const mbpDays=[...data.dates].filter(dk=>dayAlerts(eid,dk).mbp).length; const otDays=[...data.dates].filter(dk=>dayAlerts(eid,dk).ot).length; const otWeek=net>=40*3600000; return`<div class="tc"><div class="th"><span>${data.name}</span><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">${mbpDays?`<span class="chip chip-red">MBP ×${mbpDays}</span>`:''}${otDays?`<span class="chip chip-amber">OT day ×${otDays}</span>`:''}${otWeek?'<span class="chip chip-amber">OT week</span>':''}${hasN?'<span class="chip chip-red">NCNS</span>':''}${hasS?'<span class="chip chip-amber">&lt;2hr</span>':''}<span style="font-size:12px;font-weight:400;color:#6C6C70">${hoursD(net)} hrs</span></div></div>${Object.entries(data.roles).map(([r,ms])=>`<div style="padding:6px 16px;display:flex;justify-content:space-between;font-size:13px;border-bottom:1px solid #E5E5EA"><span style="color:#6C6C70">${r}</span><span>${hoursD(ms)}</span></div>`).join('')}${ld>0?`<div style="padding:6px 16px;display:flex;justify-content:space-between;font-size:12px;border-bottom:1px solid #E5E5EA;color:#A32D2D"><span>Lunch deductions</span><span>-${hoursD(ld)}</span></div>`:''}<div class="tt"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:500"><span style="color:#3B6D11">Net total</span><span style="color:#173404">${hoursD(net)}</span></div></div></div>`; }).join('')}`;
 }
 
 // ── SETTINGS ─────────────────────────────────────────────────
 function buildSettings(){
-  return`<div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Employee roster <span style="font-weight:400;color:#6C6C70">(one per line)</span></div><textarea id="et" rows="10" style="font-family:monospace;font-size:13px;resize:vertical;line-height:1.6;margin-top:6px">${S.roster.map(e=>e.name).join('\n')}</textarea><div style="font-size:12px;color:#6C6C70;margin-top:4px">${S.roster.length} employees</div></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Roles <span style="font-weight:400;color:#6C6C70">(one per line)</span></div><textarea id="rt" rows="6" style="font-family:monospace;font-size:13px;resize:vertical;margin-top:6px">${S.config.roles.join('\n')}</textarea></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Locations <span style="font-weight:400;color:#6C6C70">(one per line)</span></div><textarea id="lt" rows="4" style="font-family:monospace;font-size:13px;resize:vertical;margin-top:6px">${S.config.locations.join('\n')}</textarea></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:8px">PINs</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div style="font-size:12px;color:#6C6C70">Manager PIN</div><input id="mp" type="text" inputmode="numeric" maxlength="8" value="${S.config.managerPin}" style="font-size:18px;letter-spacing:5px;font-family:monospace;margin-top:4px"/></div><div><div style="font-size:12px;color:#6C6C70">Admin PIN</div><input id="ap" type="text" inputmode="numeric" maxlength="8" value="${S.config.adminPin}" style="font-size:18px;letter-spacing:5px;font-family:monospace;margin-top:4px"/></div></div></div><button id="sv" onclick="saveSettings()" class="btn btn-amber" style="margin-top:4px">Save settings</button></div>`;
+  const dt=deviceType();
+  return`<div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Employee roster</div><div style="font-size:12px;color:#6C6C70">One per line, as <code>Name | 6-digit code</code>. Employees without a code can clock in without one.</div><textarea id="et" rows="10" style="font-family:monospace;font-size:13px;resize:vertical;line-height:1.6;margin-top:6px">${S.roster.map(e=>e.code?`${e.name} | ${e.code}`:e.name).join('\n')}</textarea><div style="font-size:12px;color:#6C6C70;margin-top:4px">${S.roster.length} employees · ${S.roster.filter(e=>e.code).length} with codes</div></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Roles with a "Take lunch" button</div><div style="font-size:12px;color:#6C6C70;margin-bottom:8px">These roles log a 30-minute lunch without clocking out. Roles left unchecked are subject to the missed-break (MBP) alert at 6+ hours.</div><div style="display:flex;flex-direction:column;gap:8px">${S.config.roles.map((r,i)=>`<label class="cl"><input type="checkbox" class="lr" data-role="${r.replace(/"/g,'&quot;')}" ${lunchRoles().includes(r)?'checked':''} style="width:auto;margin:0"/>${r}</label>`).join('')}</div></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">This device</div><div style="font-size:12px;color:#6C6C70;margin-bottom:8px">Shared kiosks skip the "remember me" question and return to the main screen right after each clock action.</div><div style="display:flex;gap:8px"><button onclick="setDeviceType('shared')" class="btn ${dt==='shared'?'btn-amber':'btn-ghost'}" style="margin-top:0">Shared kiosk / tablet</button><button onclick="setDeviceType('')" class="btn ${dt==='shared'?'btn-ghost':'btn-amber'}" style="margin-top:0">Personal device</button></div></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Roles <span style="font-weight:400;color:#6C6C70">(one per line)</span></div><textarea id="rt" rows="6" style="font-family:monospace;font-size:13px;resize:vertical;margin-top:6px">${S.config.roles.join('\n')}</textarea></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Locations <span style="font-weight:400;color:#6C6C70">(one per line)</span></div><textarea id="lt" rows="4" style="font-family:monospace;font-size:13px;resize:vertical;margin-top:6px">${S.config.locations.join('\n')}</textarea></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:8px">PINs</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div style="font-size:12px;color:#6C6C70">Manager PIN</div><input id="mp" type="text" inputmode="numeric" maxlength="8" value="${S.config.managerPin}" style="font-size:18px;letter-spacing:5px;font-family:monospace;margin-top:4px"/></div><div><div style="font-size:12px;color:#6C6C70">Admin PIN</div><input id="ap" type="text" inputmode="numeric" maxlength="8" value="${S.config.adminPin}" style="font-size:18px;letter-spacing:5px;font-family:monospace;margin-top:4px"/></div></div></div><button id="sv" onclick="saveSettings()" class="btn btn-amber" style="margin-top:4px">Save settings</button></div>`;
+}
+
+function setDeviceType(t){
+  if(t) localStorage.setItem('tc_deviceType',t); else localStorage.removeItem('tc_deviceType');
+  showToast(t==='shared'?'Set as shared kiosk ✓':'Set as personal device ✓'); renderDash();
 }
 
 async function saveSettings(){
-  const names=(document.getElementById('et').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+  const lines=(document.getElementById('et').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
   const roles=(document.getElementById('rt').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
   const locs=(document.getElementById('lt').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
   const mp=(document.getElementById('mp').value||'').replace(/\D/g,'')||'1234';
   const ap=(document.getElementById('ap').value||'').replace(/\D/g,'')||'5678';
+  const lunch=[...document.querySelectorAll('.lr')].filter(c=>c.checked).map(c=>c.dataset.role).filter(r=>roles.includes(r));
+
+  const entries=[];
+  for(const line of lines){
+    const [rawName,rawCode=''] = line.split('|');
+    const name=rawName.trim(), code=rawCode.replace(/\D/g,'');
+    if(!name) continue;
+    if(rawCode.trim()&&code.length!==6){showToast(`⚠️ ${name}: code must be exactly 6 digits`);return;}
+    entries.push({name,code});
+  }
+  if(new Set(entries.map(e=>e.name.toLowerCase())).size!==entries.length){showToast('⚠️ Duplicate employee names');return;}
+  const codes=entries.map(e=>e.code).filter(Boolean);
+  if(new Set(codes).size!==codes.length){showToast('⚠️ Two employees share the same code');return;}
   if(!roles.length){showToast('⚠️ At least one role is required');return;}
   if(!locs.length){showToast('⚠️ At least one location is required');return;}
   if(mp===ap){showToast('⚠️ Manager and Admin PINs must differ');return;}
   await Promise.all([
-    dbSaveRoster(names),
-    dbSaveConfig({roles,locations:locs,managerPin:mp,adminPin:ap})
+    dbSaveRoster(entries),
+    dbSaveConfig({roles,locations:locs,managerPin:mp,adminPin:ap,lunchRoles:lunch})
   ]);
   const b=document.getElementById('sv'); if(b){b.textContent='✓ Saved!';b.style.background='#3B6D11';b.style.color='#EAF3DE';setTimeout(()=>renderDash(),1500)}
 }
@@ -482,13 +615,14 @@ function exportCSV(mode){
   let punches,title;
   if(mode==='day'){punches=S.punches.filter(p=>p.out&&dateKey(p.in)===S.viewDate);title=`day-${S.viewDate}`}
   else{const ws=weekStart(S.wkOff),wEnd=new Date(ws);wEnd.setDate(wEnd.getDate()+7);punches=S.punches.filter(p=>p.out&&new Date(p.in)>=ws&&new Date(p.in)<wEnd);title=`week-${dateKey(ws.toISOString())}`}
-  const roles=S.config.roles,rows=[['Employee','Date','First In','Last Out',...roles,'Lunch Deducted','Net Total','NCNS','<2hr Notice']];
+  const roles=S.config.roles,rows=[['Employee','Date','First In','Last Out',...roles,'Lunch Deducted','Net Total','MBP','OT (8+ day)','NCNS','<2hr Notice']];
   const ed={};
   punches.forEach(p=>{const dk=dateKey(p.in),k=`${p.eid}|${dk}`;if(!ed[k])ed[k]={eid:p.eid,name:p.name,date:dk,punches:[],rm:{}};const ms=new Date(p.out)-new Date(p.in);ed[k].punches.push(p);ed[k].rm[p.role]=(ed[k].rm[p.role]||0)+ms});
   Object.values(ed).sort((a,b)=>a.name.localeCompare(b.name)||a.date.localeCompare(b.date)).forEach(d=>{
     const fl=getFlag(d.eid,d.date),tot=Object.values(d.rm).reduce((a,b)=>a+b,0),ded=fl.lunch?30*60*1000:0,net=Math.max(0,tot-ded);
     const sp=[...d.punches].sort((a,b)=>new Date(a.in)-new Date(b.in)),lp=[...d.punches].sort((a,b)=>new Date(b.out)-new Date(a.out));
-    rows.push([d.name,d.date,fmtTime(sp[0].in),fmtTime(lp[0].out),...roles.map(r=>d.rm[r]?hoursD(d.rm[r]):''),fl.lunch?'-0.50':'',hoursD(net),fl.ncns?'Yes':'',fl.short?'Yes':'']);
+    const al=dayAlerts(d.eid,d.date);
+    rows.push([d.name,d.date,fmtTime(sp[0].in),fmtTime(lp[0].out),...roles.map(r=>d.rm[r]?hoursD(d.rm[r]):''),fl.lunch?'-0.50':'',hoursD(net),al.mbp?'Yes':'',al.ot?'Yes':'',fl.ncns?'Yes':'',fl.short?'Yes':'']);
   });
   const csv=rows.map(r=>r.map(v=>`"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=`timesheet-${title}.csv`;a.click();
@@ -517,6 +651,8 @@ async function init(){
 setInterval(()=>{
   renderHdr();
   const e=document.getElementById('el-val'); if(e){const a=getActive(S.selId);if(a)e.textContent=elapsed(a.in)}
+  const sc=document.querySelector('.screen.on');
+  if(sc?.id==='dashboard'&&S.tab==='status') renderDash();
 },30000);
 
 init();

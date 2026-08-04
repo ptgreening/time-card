@@ -7,6 +7,7 @@
 create table if not exists tc_employees (
   id          text primary key,
   name        text not null,
+  code        text,
   created_at  timestamptz default now()
 );
 
@@ -44,8 +45,13 @@ create table if not exists tc_config (
                 ],
   manager_pin   text not null default '1234',
   admin_pin     text not null default '5678',
+  lunch_roles   text[] not null default '{}',
   constraint single_row_only check (id = 1)
 );
+
+-- ── Migration for existing installs ───────────────────────────
+alter table tc_employees add column if not exists code text;
+alter table tc_config    add column if not exists lunch_roles text[] not null default '{}';
 
 -- Seed default config row
 insert into tc_config (id) values (1) on conflict (id) do nothing;
