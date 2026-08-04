@@ -205,11 +205,22 @@ function empRoles(emp){ const a=(emp?.roles||[]).filter(r=>S.config.roles.includ
 function empLocs(emp){ const a=(emp?.locations||[]).filter(l=>S.config.locations.includes(l)); return a.length?a:S.config.locations; }
 // A clock-out role counts as having taken lunch if there is a >=30min gap between shifts.
 function hasLunchGap(eid,date){
-  const ps=S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.in)===date).sort((a,b)=>new Date(a.in)-new Date(b.in));
-  for(let i=1;i<ps.length;i++) if(new Date(ps[i].in)-new Date(ps[i-1].out)>=30*60*1000) return true;
+  const ps=S.punches.filter(p=>p.eid===eid&&dateKey(p.in)===date).sort((a,b)=>new Date(a.in)-new Date(b.in));
+  for(let i=1;i<ps.length;i++){
+    if(!ps[i-1].out) continue;
+    if(new Date(ps[i].in)-new Date(ps[i-1].out)>=30*60*1000) return true;
+  }
   return false;
 }
-function grossMs(eid,date){ return S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.in)===date).reduce((s,p)=>s+(new Date(p.out)-new Date(p.in)),0); }
+// Time on the clock for a date, counting a shift that is still running up to now
+// so the 6-hour break alert fires during the shift rather than after it ends.
+function grossMs(eid,date){
+  const dayEnd=new Date(date+'T23:59:59').getTime();
+  return S.punches.filter(p=>p.eid===eid&&dateKey(p.in)===date).reduce((s,p)=>{
+    const end=p.out?new Date(p.out).getTime():Math.min(Date.now(),dayEnd);
+    return s+Math.max(0,end-new Date(p.in).getTime());
+  },0);
+}
 function hadNonLunchRole(eid,date){ return S.punches.some(p=>p.eid===eid&&dateKey(p.in)===date&&lunchMode(p.role)==='clockout'); }
 function dayAlerts(eid,date){
   const hrs=grossMs(eid,date)/3600000, fl=getFlag(eid,date);
