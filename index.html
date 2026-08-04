@@ -160,7 +160,7 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 const DEFS = {
   roles: ['Manager','Actor','Makeup Artist','Crowd Control','Carnival Crew'],
   locations: ['Main Site','Storage Lot A','Storage Lot B','Office'],
-  managerPin: '1234', adminPin: '5678', lunchRoles: []
+  managerPin: '1234', adminPin: '5678', lunchRoles: [], lunchClockoutRoles: []
 };
 const S = {
   roster:[], punches:[], flags:{}, config:{...DEFS},
@@ -168,6 +168,7 @@ const S = {
   tab:'status', viewDate:'', wkOff:0,
   pinBuf:'', pinErr:false, switchMode:false,
   empCodeBuf:'', empCodeErr:false, codeOk:false,
+  editEmp:null, editRole:null,
   showFlagSearch:false, resetTimer:null, resetInterval:null
 };
 function deviceType(){ return localStorage.getItem('tc_deviceType')||''; }
@@ -195,12 +196,25 @@ function netMs(eid,date){
 }
 function normPunch(p){ return { id:p.id, eid:p.employee_id, name:p.employee_name, role:p.role, loc:p.location, in:p.clock_in, out:p.clock_out }; }
 function lunchRoles(){ return S.config.lunchRoles||[]; }
+function lunchClockoutRoles(){ return S.config.lunchClockoutRoles||[]; }
 function roleHasLunchBtn(role){ return lunchRoles().includes(role); }
+function roleClocksOutForLunch(role){ return lunchClockoutRoles().includes(role); }
+function lunchMode(role){ return roleHasLunchBtn(role)?'button':(roleClocksOutForLunch(role)?'clockout':'none'); }
+// Roles / locations an employee is authorised for. Empty list = all of them.
+function empRoles(emp){ const a=(emp?.roles||[]).filter(r=>S.config.roles.includes(r)); return a.length?a:S.config.roles; }
+function empLocs(emp){ const a=(emp?.locations||[]).filter(l=>S.config.locations.includes(l)); return a.length?a:S.config.locations; }
+// A clock-out role counts as having taken lunch if there is a >=30min gap between shifts.
+function hasLunchGap(eid,date){
+  const ps=S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.in)===date).sort((a,b)=>new Date(a.in)-new Date(b.in));
+  for(let i=1;i<ps.length;i++) if(new Date(ps[i].in)-new Date(ps[i-1].out)>=30*60*1000) return true;
+  return false;
+}
 function grossMs(eid,date){ return S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.in)===date).reduce((s,p)=>s+(new Date(p.out)-new Date(p.in)),0); }
-function hadNonLunchRole(eid,date){ return S.punches.some(p=>p.eid===eid&&dateKey(p.in)===date&&!roleHasLunchBtn(p.role)); }
+function hadNonLunchRole(eid,date){ return S.punches.some(p=>p.eid===eid&&dateKey(p.in)===date&&lunchMode(p.role)==='clockout'); }
 function dayAlerts(eid,date){
   const hrs=grossMs(eid,date)/3600000, fl=getFlag(eid,date);
-  return { mbp: hadNonLunchRole(eid,date)&&hrs>=6&&!fl.lunch, ot: hrs>=8 };
+  const tookLunch=fl.lunch||hasLunchGap(eid,date);
+  return { mbp: hadNonLunchRole(eid,date)&&hrs>=6&&!tookLunch, ot: hrs>=8 };
 }
 function alertChips(eid,date){
   const a=dayAlerts(eid,date);
@@ -221,10 +235,10 @@ async function loadAll(){
     db.from('tc_day_flags').select('*'),
     db.from('tc_config').select('*').eq('id',1).single()
   ]);
-  if(eR.data) S.roster = eR.data.map(e=>({id:e.id,name:e.name,code:e.code||''}));
+  if(eR.data) S.roster = eR.data.map(e=>({id:e.id,name:e.name,code:e.code||'',roles:e.roles||[],locations:e.locations||[]}));
   if(pR.data) S.punches = pR.data.map(normPunch);
   if(fR.data){ S.flags={}; fR.data.forEach(f=>{ S.flags[`${f.employee_id}_${f.flag_date}`]={lunch:f.lunch,ncns:f.ncns,short:f.short_notice}; }); }
-  if(cR.data) S.config={roles:cR.data.roles,locations:cR.data.locations,managerPin:cR.data.manager_pin,adminPin:cR.data.admin_pin,lunchRoles:cR.data.lunch_roles||[]};
+  if(cR.data) S.config={roles:cR.data.roles,locations:cR.data.locations,managerPin:cR.data.manager_pin,adminPin:cR.data.admin_pin,lunchRoles:cR.data.lunch_roles||[],lunchClockoutRoles:cR.data.lunch_clockout_roles||[]};
   if(eR.error||pR.error) throw new Error('Load failed');
 }
 
@@ -260,20 +274,25 @@ async function dbSetFlag(eid,date,flags){
   await db.from('tc_day_flags').upsert({id,employee_id:eid,flag_date:date,lunch:!!flags.lunch,ncns:!!flags.ncns,short_notice:!!flags.short});
   S.flags[`${eid}_${date}`]=flags;
 }
-async function dbSaveRoster(entries){
-  const newRoster=entries.map(({name,code})=>{
-    const ex=S.roster.find(e=>e.name===name);
-    return { id:ex?ex.id:genId(), name, code };
-  });
-  const newIds=new Set(newRoster.map(e=>e.id));
-  const toDelete=S.roster.filter(e=>!newIds.has(e.id)).map(e=>e.id);
-  if(toDelete.length) await db.from('tc_employees').delete().in('id',toDelete);
-  if(newRoster.length) await db.from('tc_employees').upsert(newRoster.map(e=>({id:e.id,name:e.name,code:e.code||null})));
-  S.roster=newRoster;
+async function dbSaveEmployee(emp){
+  const row={id:emp.id,name:emp.name,code:emp.code||null,roles:emp.roles||[],locations:emp.locations||[]};
+  const {error}=await db.from('tc_employees').upsert(row);
+  if(error) return false;
+  const i=S.roster.findIndex(e=>e.id===emp.id);
+  if(i>=0) S.roster[i]={...emp}; else S.roster.push({...emp});
+  S.roster.sort((a,b)=>a.name.localeCompare(b.name));
+  return true;
+}
+async function dbDeleteEmployee(id){
+  const {error}=await db.from('tc_employees').delete().eq('id',id);
+  if(error) return false;
+  S.roster=S.roster.filter(e=>e.id!==id);
+  return true;
 }
 async function dbSaveConfig(cfg){
-  await db.from('tc_config').update({roles:cfg.roles,locations:cfg.locations,manager_pin:cfg.managerPin,admin_pin:cfg.adminPin,lunch_roles:cfg.lunchRoles}).eq('id',1);
-  S.config=cfg;
+  const {error}=await db.from('tc_config').update({roles:cfg.roles,locations:cfg.locations,manager_pin:cfg.managerPin,admin_pin:cfg.adminPin,lunch_roles:cfg.lunchRoles,lunch_clockout_roles:cfg.lunchClockoutRoles}).eq('id',1);
+  if(!error) S.config=cfg;
+  return !error;
 }
 async function dbDeletePunch(pid){
   const {error}=await db.from('tc_punches').delete().eq('id',pid);
@@ -377,18 +396,23 @@ function renderEmpBody(){
   const notYouHtml=S.isPersonalDevice?`<div style="text-align:center;margin-top:16px"><button onclick="forgetDevice()" style="background:none;border:none;font-size:12px;color:#8E8E93;cursor:pointer;text-decoration:underline">Not ${emp.name}? Switch user</button></div>`:'';
   const mainBtn=`<button class="btn btn-ghost" onclick="cancelAndGoHome()" style="margin-top:14px"><i class="ti ti-home"></i> Return to main</button>`;
   const statusHtml=buildMyStatus(emp.id);
+  const myRoles=empRoles(emp), myLocs=empLocs(emp);
+  // A single authorised option is chosen automatically — the picker is hidden but still supplies the value.
+  const picker=(id,label,opts)=>opts.length===1
+    ? `<div style="margin-top:12px"><div style="font-size:12px;color:#6C6C70">${label}</div><div style="font-size:15px;font-weight:500;margin-top:4px">${opts[0]}</div><select id="${id}" style="display:none"><option>${opts[0]}</option></select></div>`
+    : `<label>${label}</label><select id="${id}" style="margin-top:6px">${opts.map(o=>`<option>${o}</option>`).join('')}</select>`;
 
-  if(!S.config.roles.length){
-    body.innerHTML=`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-alert-triangle"></i> No roles configured</div><div style="font-size:13px;color:#854F0B">An admin must add at least one role before employees can clock in.</div></div>`;
+  if(!myRoles.length||!myLocs.length){
+    body.innerHTML=`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-alert-triangle"></i> Nothing assigned yet</div><div style="font-size:13px;color:#854F0B">An admin needs to assign you at least one role and location before you can clock in.</div></div>${mainBtn}`;
     return;
   }
   if(act){
     const canLunch=roleHasLunchBtn(act.role)&&!getFlag(emp.id,todayKey()).lunch;
     const lunchBtn=canLunch?`<button class="btn btn-amber" onclick="takeLunch()"><i class="ti ti-tools-kitchen-2"></i> Take lunch (30 min)</button>`:'';
-    body.innerHTML=`<div class="active-card"><div class="ml" style="color:#3B6D11;margin-bottom:8px">Currently clocked in</div><div style="font-size:20px;font-weight:500;margin-bottom:2px">${act.role}</div><div style="font-size:13px;color:#6C6C70;margin-bottom:14px">${act.loc}</div><div style="display:flex;gap:24px"><div><div class="ml">Clock in</div><div style="font-size:15px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div><div><div class="ml">Elapsed</div><div id="el-val" style="font-size:15px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div></div></div>${S.switchMode?`<div class="card"><div style="font-weight:500;margin-bottom:4px">Switch to…</div><label>New role</label><select id="sw-r" style="margin-top:6px">${S.config.roles.map(r=>`<option>${r}</option>`).join('')}</select><label>Location</label><select id="sw-l" style="margin-top:6px">${S.config.locations.map(l=>`<option>${l}</option>`).join('')}</select><button class="btn btn-amber" onclick="doSwitch('${act.id}')">Confirm switch</button><button class="btn btn-ghost" onclick="S.switchMode=false;renderEmpBody()">Cancel</button></div>`:`${lunchBtn}<button class="btn btn-ghost" onclick="S.switchMode=true;renderEmpBody()"><i class="ti ti-refresh"></i> Switch role / location</button><button class="btn btn-red" onclick="doClockOut('${act.id}')">Clock out</button>`}${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
+    body.innerHTML=`<div class="active-card"><div class="ml" style="color:#3B6D11;margin-bottom:8px">Currently clocked in</div><div style="font-size:20px;font-weight:500;margin-bottom:2px">${act.role}</div><div style="font-size:13px;color:#6C6C70;margin-bottom:14px">${act.loc}</div><div style="display:flex;gap:24px"><div><div class="ml">Clock in</div><div style="font-size:15px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div><div><div class="ml">Elapsed</div><div id="el-val" style="font-size:15px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div></div></div>${S.switchMode?`<div class="card"><div style="font-weight:500;margin-bottom:4px">Switch to…</div>${picker('sw-r','New role',myRoles)}${picker('sw-l','Location',myLocs)}<button class="btn btn-amber" onclick="doSwitch('${act.id}')">Confirm switch</button><button class="btn btn-ghost" onclick="S.switchMode=false;renderEmpBody()">Cancel</button></div>`:`${lunchBtn}<button class="btn btn-ghost" onclick="S.switchMode=true;renderEmpBody()"><i class="ti ti-refresh"></i> Switch role / location</button><button class="btn btn-red" onclick="doClockOut('${act.id}')">Clock out</button>`}${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
   } else {
     const chk=canClockIn(emp.id);
-    body.innerHTML=`${!chk.ok?`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-clock"></i> Break in progress</div><div style="font-size:13px;color:#854F0B">You can clock back in after <strong>${chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</strong></div></div>`:''}<div class="card"><div style="font-size:14px;color:#6C6C70;margin-bottom:4px">Select your role and location</div><label>Role</label><select id="ci-r" style="margin-top:6px">${S.config.roles.map(r=>`<option>${r}</option>`).join('')}</select><label>Location</label><select id="ci-l" style="margin-top:6px">${S.config.locations.map(l=>`<option>${l}</option>`).join('')}</select></div><button class="btn btn-green" onclick="doClockIn()" ${!chk.ok?'disabled style="opacity:.4;cursor:not-allowed"':''}>Clock in</button>${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
+    body.innerHTML=`${!chk.ok?`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-clock"></i> Break in progress</div><div style="font-size:13px;color:#854F0B">You can clock back in after <strong>${chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</strong></div></div>`:''}<div class="card"><div style="font-size:14px;color:#6C6C70;margin-bottom:4px">${myRoles.length===1&&myLocs.length===1?'Confirm and clock in':'Select your role and location'}</div>${picker('ci-r','Role',myRoles)}${picker('ci-l','Location',myLocs)}</div><button class="btn btn-green" onclick="doClockIn()" ${!chk.ok?'disabled style="opacity:.4;cursor:not-allowed"':''}>Clock in</button>${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
   }
 }
 
@@ -401,7 +425,7 @@ function buildMyStatus(eid){
   if(eps.length) rows.push(['First clock in', fmtTime(eps[0].in)]);
   if(act) rows.push(['Current shift', `${act.role} · ${act.loc}`]);
   else if(eps.length){ const last=eps[eps.length-1]; if(last.out) rows.push(['Last clock out', fmtTime(last.out)]); }
-  rows.push(['Lunch', fl.lunch?'Taken (30 min deducted)':'Not taken']);
+  rows.push(['Lunch', fl.lunch?'Taken (30 min deducted)':(hasLunchGap(eid,today)?'Taken (clocked out)':'Not taken')]);
   rows.push(['Hours today', `${hoursD(netMs(eid,today))} hrs`]);
   if(!act&&!chk.ok) rows.push(['Can clock back in', chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})]);
   else if(!act) rows.push(['Can clock back in','Now']);
@@ -419,7 +443,7 @@ async function takeLunch(){
 async function doClockIn(){
   const emp=S.roster.find(e=>e.id===S.selId); if(!emp||!canClockIn(emp.id).ok)return;
   const role=document.getElementById('ci-r').value, loc=document.getElementById('ci-l').value;
-  if(!S.config.roles.includes(role)||!S.config.locations.includes(loc)){showToast('⚠️ Invalid role or location');return;}
+  if(!empRoles(emp).includes(role)||!empLocs(emp).includes(loc)){showToast('⚠️ You are not assigned to that role or location');return;}
   const ok=await dbClockIn(emp.id,emp.name,role,loc);
   if(!ok){showToast('⚠️ Save failed — check connection');return}
   if(S.isPersonalDevice){ showToast(`Clocked in as ${role} ✓`); renderEmpBody(); }
@@ -436,7 +460,8 @@ async function doClockOut(pid){
 
 async function doSwitch(pid){
   const nr=document.getElementById('sw-r').value, nl=document.getElementById('sw-l').value;
-  if(!S.config.roles.includes(nr)||!S.config.locations.includes(nl)){showToast('⚠️ Invalid role or location');return;}
+  const emp=S.roster.find(e=>e.id===S.selId);
+  if(!empRoles(emp).includes(nr)||!empLocs(emp).includes(nl)){showToast('⚠️ You are not assigned to that role or location');return;}
   await dbSwitchRole(pid,nr,nl); S.switchMode=false;
   if(S.isPersonalDevice){ showToast(`Switched to ${nr} ✓`); renderEmpBody(); }
   else { finishAndGoHome(`Switched to ${nr} ✓`); }
@@ -491,7 +516,7 @@ function renderDashTabs(){
   const tabs=[['status','Status'],['daily','Daily'],['weekly','Weekly']]; if(S.isAdmin)tabs.push(['settings','Settings']);
   document.getElementById('dash-tabs').innerHTML=tabs.map(([id,lbl])=>`<button class="tab${S.tab===id?' on':''}" onclick="setTab('${id}')">${lbl}</button>`).join('');
 }
-function setTab(t){ S.tab=t; S.showFlagSearch=false; renderDashTabs(); renderDash(); }
+function setTab(t){ S.tab=t; S.showFlagSearch=false; S.editEmp=null; S.editRole=null; renderDashTabs(); renderDash(); }
 function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; if(S.tab==='status')b.innerHTML=buildStatus(); else if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else b.innerHTML=buildSettings(); }
 
 // ── QUICK STATUS (live) ──────────────────────────────────────
@@ -505,7 +530,10 @@ function buildStatus(){
   const blocks=Object.entries(byLoc).sort(([a],[b])=>a.localeCompare(b)).map(([loc,ps])=>{
     const rows=ps.sort((a,b)=>a.name.localeCompare(b.name)).map(p=>{
       const fl=getFlag(p.eid,today);
-      const lunch=fl.lunch?'<span class="chip chip-green">Lunch taken</span>':(roleHasLunchBtn(p.role)?'<span class="chip chip-amber">No lunch yet</span>':'<span class="chip chip-amber">Lunch not logged</span>');
+      const m=lunchMode(p.role);
+      const lunch=(fl.lunch||hasLunchGap(p.eid,today))?'<span class="chip chip-green">Lunch taken</span>'
+        :m==='button'?'<span class="chip chip-amber">No lunch yet</span>'
+        :m==='clockout'?'<span class="chip chip-amber">Has not clocked out for lunch</span>':'';
       return `<div class="pr"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px"><span style="font-weight:500;font-size:15px">${p.name}</span><span style="font-size:13px;color:#6C6C70">${elapsed(p.in)}</span></div><div style="font-size:13px;color:#6C6C70;margin-top:2px">${p.role} · in at ${fmtTime(p.in)}</div><div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">${lunch}${alertChips(p.eid,today)}</div></div>`;
     }).join('');
     return `<div class="tc"><div class="th"><span>${loc}</span><span style="font-size:12px;font-weight:400;color:#6C6C70">${ps.length}</span></div>${rows}</div>`;
@@ -571,45 +599,247 @@ function buildWeekly(){
 }
 
 // ── SETTINGS ─────────────────────────────────────────────────
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
 function buildSettings(){
+  if(S.editEmp) return buildEmpEditor();
+  if(S.editRole) return buildRoleEditor();
   const dt=deviceType();
-  return`<div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Employee roster</div><div style="font-size:12px;color:#6C6C70">One per line, as <code>Name | 6-digit code</code>. Employees without a code can clock in without one.</div><textarea id="et" rows="10" style="font-family:monospace;font-size:13px;resize:vertical;line-height:1.6;margin-top:6px">${S.roster.map(e=>e.code?`${e.name} | ${e.code}`:e.name).join('\n')}</textarea><div style="font-size:12px;color:#6C6C70;margin-top:4px">${S.roster.length} employees · ${S.roster.filter(e=>e.code).length} with codes</div></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Roles with a "Take lunch" button</div><div style="font-size:12px;color:#6C6C70;margin-bottom:8px">These roles log a 30-minute lunch without clocking out. Roles left unchecked are subject to the missed-break (MBP) alert at 6+ hours.</div><div style="display:flex;flex-direction:column;gap:8px">${S.config.roles.map((r,i)=>`<label class="cl"><input type="checkbox" class="lr" data-role="${r.replace(/"/g,'&quot;')}" ${lunchRoles().includes(r)?'checked':''} style="width:auto;margin:0"/>${r}</label>`).join('')}</div></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">This device</div><div style="font-size:12px;color:#6C6C70;margin-bottom:8px">Shared kiosks skip the "remember me" question and return to the main screen right after each clock action.</div><div style="display:flex;gap:8px"><button onclick="setDeviceType('shared')" class="btn ${dt==='shared'?'btn-amber':'btn-ghost'}" style="margin-top:0">Shared kiosk / tablet</button><button onclick="setDeviceType('')" class="btn ${dt==='shared'?'btn-ghost':'btn-amber'}" style="margin-top:0">Personal device</button></div></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Roles <span style="font-weight:400;color:#6C6C70">(one per line)</span></div><textarea id="rt" rows="6" style="font-family:monospace;font-size:13px;resize:vertical;margin-top:6px">${S.config.roles.join('\n')}</textarea></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:4px">Locations <span style="font-weight:400;color:#6C6C70">(one per line)</span></div><textarea id="lt" rows="4" style="font-family:monospace;font-size:13px;resize:vertical;margin-top:6px">${S.config.locations.join('\n')}</textarea></div><div class="card"><div style="font-size:13px;font-weight:500;margin-bottom:8px">PINs</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px"><div><div style="font-size:12px;color:#6C6C70">Manager PIN</div><input id="mp" type="text" inputmode="numeric" maxlength="8" value="${S.config.managerPin}" style="font-size:18px;letter-spacing:5px;font-family:monospace;margin-top:4px"/></div><div><div style="font-size:12px;color:#6C6C70">Admin PIN</div><input id="ap" type="text" inputmode="numeric" maxlength="8" value="${S.config.adminPin}" style="font-size:18px;letter-spacing:5px;font-family:monospace;margin-top:4px"/></div></div></div><button id="sv" onclick="saveSettings()" class="btn btn-amber" style="margin-top:4px">Save settings</button></div>`;
+
+  const empList=S.roster.length
+    ? S.roster.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(e=>{
+        const r=e.roles||[], l=e.locations||[];
+        return `<div class="pr" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+          <div style="min-width:0">
+            <div style="font-weight:500;font-size:15px">${esc(e.name)}</div>
+            <div style="font-size:12px;color:#6C6C70;margin-top:2px">${e.code?'Code '+e.code:'<span style="color:#BA7517">No code set</span>'}</div>
+            <div style="font-size:12px;color:#6C6C70;margin-top:2px">${r.length?esc(r.join(', ')):'All roles'} · ${l.length?esc(l.join(', ')):'All locations'}</div>
+          </div>
+          <div style="display:flex;gap:12px;flex-shrink:0">
+            <button class="del" style="color:#007AFF" onclick="openEmpEditor('${e.id}')">Edit</button>
+            <button class="del" onclick="removeEmployee('${e.id}')">Delete</button>
+          </div>
+        </div>`;
+      }).join('')
+    : `<div class="pr" style="font-size:14px;color:#6C6C70">No employees yet.</div>`;
+
+  const roleList=S.config.roles.length
+    ? S.config.roles.map((r,ri)=>{
+        const m=lunchMode(r);
+        const chip=m==='button'?'<span class="chip chip-green">Lunch button</span>'
+                 :m==='clockout'?'<span class="chip chip-amber">Clocks out for lunch</span>'
+                 :'<span class="chip chip-red">No lunch rule</span>';
+        const used=S.roster.filter(e=>(e.roles||[]).includes(r)).length;
+        return `<div class="pr" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
+          <div style="min-width:0">
+            <div style="font-weight:500;font-size:15px">${esc(r)}</div>
+            <div style="margin-top:4px">${chip}</div>
+            <div style="font-size:12px;color:#6C6C70;margin-top:4px">${used} assigned</div>
+          </div>
+          <div style="display:flex;gap:12px;flex-shrink:0">
+            <button class="del" style="color:#007AFF" onclick="openRoleEditor(${ri})">Edit</button>
+            <button class="del" onclick="removeRole(${ri})">Delete</button>
+          </div>
+        </div>`;
+      }).join('')
+    : `<div class="pr" style="font-size:14px;color:#6C6C70">No roles yet.</div>`;
+
+  return `<div>
+    <div class="tc">
+      <div class="th"><span>Employees</span><span style="font-size:12px;font-weight:400;color:#6C6C70">${S.roster.length}</span></div>
+      ${empList}
+      <div style="padding:12px 16px"><button class="btn btn-amber" style="margin-top:0" onclick="openEmpEditor(null)"><i class="ti ti-plus"></i> Add new employee</button></div>
+    </div>
+
+    <div class="tc">
+      <div class="th"><span>Roles</span><span style="font-size:12px;font-weight:400;color:#6C6C70">${S.config.roles.length}</span></div>
+      ${roleList}
+      <div style="padding:12px 16px"><button class="btn btn-amber" style="margin-top:0" onclick="openRoleEditor(null)"><i class="ti ti-plus"></i> Add new role</button></div>
+    </div>
+
+    <div class="card">
+      <div style="font-size:13px;font-weight:500;margin-bottom:4px">Locations <span style="font-weight:400;color:#6C6C70">(one per line)</span></div>
+      <textarea id="lt" rows="4" style="font-family:monospace;font-size:13px;resize:vertical;margin-top:6px">${esc(S.config.locations.join('\n'))}</textarea>
+      <button class="btn btn-ghost" onclick="saveLocations()">Save locations</button>
+    </div>
+
+    <div class="card">
+      <div style="font-size:13px;font-weight:500;margin-bottom:8px">PINs</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div><div style="font-size:12px;color:#6C6C70">Manager PIN</div><input id="mp" type="text" inputmode="numeric" maxlength="8" value="${S.config.managerPin}" style="font-size:18px;letter-spacing:5px;font-family:monospace;margin-top:4px"/></div>
+        <div><div style="font-size:12px;color:#6C6C70">Admin PIN</div><input id="ap" type="text" inputmode="numeric" maxlength="8" value="${S.config.adminPin}" style="font-size:18px;letter-spacing:5px;font-family:monospace;margin-top:4px"/></div>
+      </div>
+      <button class="btn btn-ghost" onclick="savePins()">Save PINs</button>
+    </div>
+
+    <div class="card">
+      <div style="font-size:13px;font-weight:500;margin-bottom:4px">This device</div>
+      <div style="font-size:12px;color:#6C6C70;margin-bottom:8px">Shared kiosks skip the "remember me" question and return to the main screen right after each clock action.</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="setDeviceType('shared')" class="btn ${dt==='shared'?'btn-amber':'btn-ghost'}" style="margin-top:0">Shared kiosk / tablet</button>
+        <button onclick="setDeviceType('')" class="btn ${dt==='shared'?'btn-ghost':'btn-amber'}" style="margin-top:0">Personal device</button>
+      </div>
+    </div>
+  </div>`;
 }
 
+// ── EMPLOYEE EDITOR ──────────────────────────────────────────
+function openEmpEditor(id){
+  const e=id?S.roster.find(x=>x.id===id):null;
+  S.editEmp = e ? {...e, roles:[...(e.roles||[])], locations:[...(e.locations||[])]}
+                : {id:genId(), name:'', code:'', roles:[], locations:[], isNew:true};
+  renderDash();
+}
+function closeEditor(){ S.editEmp=null; S.editRole=null; renderDash(); }
+
+function buildEmpEditor(){
+  const e=S.editEmp;
+  const box=(cls,list,sel)=>list.length
+    ? list.map(v=>`<label class="cl" style="padding:4px 0"><input type="checkbox" class="${cls}" value="${esc(v)}" ${sel.includes(v)?'checked':''} style="width:auto;margin:0"/>${esc(v)}</label>`).join('')
+    : `<div style="font-size:13px;color:#6C6C70">None configured yet.</div>`;
+  return `<div>
+    <div class="card">
+      <div style="font-weight:500;font-size:16px;margin-bottom:4px">${e.isNew?'Add new employee':'Edit employee'}</div>
+      <label>Full name</label>
+      <input id="ee-name" value="${esc(e.name)}" placeholder="Jane Doe" autocomplete="off"/>
+      <label>6-digit code</label>
+      <input id="ee-code" value="${esc(e.code||'')}" inputmode="numeric" maxlength="6" placeholder="Leave blank for no code" autocomplete="off" style="font-family:monospace;font-size:18px;letter-spacing:4px"/>
+      <div style="font-size:12px;color:#6C6C70;margin-top:4px">They type this on the keypad to clock in or out.</div>
+    </div>
+    <div class="card">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Roles</div>
+      <div style="font-size:12px;color:#6C6C70;margin-bottom:8px">Check every role they may clock in as. Check exactly one and it is picked automatically.</div>
+      <div style="display:flex;flex-direction:column">${box('ee-role',S.config.roles,e.roles)}</div>
+    </div>
+    <div class="card">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Authorised locations</div>
+      <div style="font-size:12px;color:#6C6C70;margin-bottom:8px">Check exactly one and they skip the location step entirely when clocking in.</div>
+      <div style="display:flex;flex-direction:column">${box('ee-loc',S.config.locations,e.locations)}</div>
+    </div>
+    <button class="btn btn-green" onclick="saveEmpEditor()">${e.isNew?'Add employee':'Save changes'}</button>
+    <button class="btn btn-ghost" onclick="closeEditor()">Cancel</button>
+  </div>`;
+}
+
+async function saveEmpEditor(){
+  const e=S.editEmp;
+  const name=(document.getElementById('ee-name').value||'').trim();
+  const code=(document.getElementById('ee-code').value||'').replace(/\D/g,'');
+  const roles=[...document.querySelectorAll('.ee-role:checked')].map(c=>c.value);
+  const locations=[...document.querySelectorAll('.ee-loc:checked')].map(c=>c.value);
+  if(!name){showToast('⚠️ Name is required');return}
+  if(code&&code.length!==6){showToast('⚠️ Code must be exactly 6 digits');return}
+  if(S.roster.some(x=>x.id!==e.id&&x.name.toLowerCase()===name.toLowerCase())){showToast('⚠️ Another employee already has that name');return}
+  if(code&&S.roster.some(x=>x.id!==e.id&&x.code===code)){showToast('⚠️ Another employee already uses that code');return}
+  if(!roles.length){showToast('⚠️ Assign at least one role');return}
+  if(!locations.length){showToast('⚠️ Assign at least one location');return}
+  const ok=await dbSaveEmployee({id:e.id,name,code,roles,locations});
+  if(!ok){showToast('⚠️ Save failed — check connection');return}
+  showToast(e.isNew?`${name} added ✓`:'Changes saved ✓');
+  S.editEmp=null; renderDash();
+}
+
+async function removeEmployee(id){
+  const e=S.roster.find(x=>x.id===id); if(!e)return;
+  const n=S.punches.filter(p=>p.eid===id).length;
+  if(!confirm(`Remove ${e.name} from the roster?\n\n${n?`Their ${n} existing time entries stay in the records and reports.`:'They have no time entries.'}\n\nThis cannot be undone.`))return;
+  const ok=await dbDeleteEmployee(id);
+  showToast(ok?`${e.name} removed ✓`:'⚠️ Delete failed'); renderDash();
+}
+
+// ── ROLE EDITOR ──────────────────────────────────────────────
+function openRoleEditor(ri){
+  const name = ri===null?null:S.config.roles[ri];
+  S.editRole = name
+    ? {orig:name, name, mode:lunchMode(name)}
+    : {orig:null, name:'', mode:'clockout'};
+  renderDash();
+}
+
+function buildRoleEditor(){
+  const r=S.editRole;
+  const opt=(val,title,desc)=>`<label class="cl" style="align-items:flex-start;padding:8px 0"><input type="radio" name="rl-mode" value="${val}" ${r.mode===val?'checked':''} style="width:auto;margin:3px 0 0"/><span><span style="font-weight:500">${title}</span><br><span style="font-size:12px;color:#6C6C70">${desc}</span></span></label>`;
+  return `<div>
+    <div class="card">
+      <div style="font-weight:500;font-size:16px;margin-bottom:4px">${r.orig?'Edit role':'Add new role'}</div>
+      <label>Role name</label>
+      <input id="rl-name" value="${esc(r.name)}" placeholder="Actor" autocomplete="off"/>
+    </div>
+    <div class="card">
+      <div style="font-size:13px;font-weight:500;margin-bottom:2px">Lunch handling</div>
+      <div style="font-size:12px;color:#6C6C70;margin-bottom:4px">The 30-minute minimum break applies either way — it is just recorded differently.</div>
+      ${opt('button','Take lunch button','One tap logs a 30-minute lunch and deducts it. They stay clocked in.')}
+      ${opt('clockout','Clocks out for lunch','They clock out and back in. The 30-minute lockout stops an early return, and a missed break raises an MBP alert at 6+ hours.')}
+      ${opt('none','No lunch rule','No lunch button and no missed-break alert. For short or on-call roles.')}
+    </div>
+    <button class="btn btn-green" onclick="saveRoleEditor()">${r.orig?'Save changes':'Add role'}</button>
+    <button class="btn btn-ghost" onclick="closeEditor()">Cancel</button>
+  </div>`;
+}
+
+async function saveRoleEditor(){
+  const r=S.editRole;
+  const name=(document.getElementById('rl-name').value||'').trim();
+  const mode=(document.querySelector('input[name="rl-mode"]:checked')||{}).value||'none';
+  if(!name){showToast('⚠️ Role name is required');return}
+  if(S.config.roles.some(x=>x!==r.orig&&x.toLowerCase()===name.toLowerCase())){showToast('⚠️ That role already exists');return}
+
+  const roles = r.orig ? S.config.roles.map(x=>x===r.orig?name:x) : [...S.config.roles,name];
+  const rename = v => r.orig ? v.map(x=>x===r.orig?name:x) : v;
+  let btn=rename(lunchRoles()).filter(x=>x!==name);
+  let co =rename(lunchClockoutRoles()).filter(x=>x!==name);
+  if(mode==='button') btn.push(name);
+  if(mode==='clockout') co.push(name);
+
+  const ok=await dbSaveConfig({...S.config, roles, lunchRoles:btn.filter(x=>roles.includes(x)), lunchClockoutRoles:co.filter(x=>roles.includes(x))});
+  if(!ok){showToast('⚠️ Save failed — check connection');return}
+  // Carry a rename through every employee's assigned roles.
+  if(r.orig&&r.orig!==name){
+    for(const e of S.roster.filter(e=>(e.roles||[]).includes(r.orig)))
+      await dbSaveEmployee({...e, roles:e.roles.map(x=>x===r.orig?name:x)});
+  }
+  showToast(r.orig?'Role saved ✓':`${name} added ✓`);
+  S.editRole=null; renderDash();
+}
+
+async function removeRole(ri){
+  const name=S.config.roles[ri]; if(name===undefined)return;
+  const used=S.roster.filter(e=>(e.roles||[]).includes(name));
+  if(S.config.roles.length<=1){showToast('⚠️ You need at least one role');return}
+  if(!confirm(`Delete the role "${name}"?\n\n${used.length?`It will be removed from ${used.length} employee${used.length===1?'':'s'}.`:'No employees are assigned to it.'}\nPast time entries keep this role name.\n\nThis cannot be undone.`))return;
+  const roles=S.config.roles.filter(r=>r!==name);
+  const ok=await dbSaveConfig({...S.config, roles, lunchRoles:lunchRoles().filter(r=>r!==name), lunchClockoutRoles:lunchClockoutRoles().filter(r=>r!==name)});
+  if(!ok){showToast('⚠️ Delete failed');return}
+  for(const e of used) await dbSaveEmployee({...e, roles:e.roles.filter(r=>r!==name)});
+  showToast('Role deleted ✓'); renderDash();
+}
+
+// ── OTHER SETTINGS ───────────────────────────────────────────
 function setDeviceType(t){
   if(t) localStorage.setItem('tc_deviceType',t); else localStorage.removeItem('tc_deviceType');
   showToast(t==='shared'?'Set as shared kiosk ✓':'Set as personal device ✓'); renderDash();
 }
 
-async function saveSettings(){
-  const lines=(document.getElementById('et').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
-  const roles=(document.getElementById('rt').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
+async function saveLocations(){
   const locs=(document.getElementById('lt').value||'').split('\n').map(s=>s.trim()).filter(Boolean);
-  const mp=(document.getElementById('mp').value||'').replace(/\D/g,'')||'1234';
-  const ap=(document.getElementById('ap').value||'').replace(/\D/g,'')||'5678';
-  const lunch=[...document.querySelectorAll('.lr')].filter(c=>c.checked).map(c=>c.dataset.role).filter(r=>roles.includes(r));
-
-  const entries=[];
-  for(const line of lines){
-    const [rawName,rawCode=''] = line.split('|');
-    const name=rawName.trim(), code=rawCode.replace(/\D/g,'');
-    if(!name) continue;
-    if(rawCode.trim()&&code.length!==6){showToast(`⚠️ ${name}: code must be exactly 6 digits`);return;}
-    entries.push({name,code});
-  }
-  if(new Set(entries.map(e=>e.name.toLowerCase())).size!==entries.length){showToast('⚠️ Duplicate employee names');return;}
-  const codes=entries.map(e=>e.code).filter(Boolean);
-  if(new Set(codes).size!==codes.length){showToast('⚠️ Two employees share the same code');return;}
-  if(!roles.length){showToast('⚠️ At least one role is required');return;}
-  if(!locs.length){showToast('⚠️ At least one location is required');return;}
-  if(mp===ap){showToast('⚠️ Manager and Admin PINs must differ');return;}
-  await Promise.all([
-    dbSaveRoster(entries),
-    dbSaveConfig({roles,locations:locs,managerPin:mp,adminPin:ap,lunchRoles:lunch})
-  ]);
-  const b=document.getElementById('sv'); if(b){b.textContent='✓ Saved!';b.style.background='#3B6D11';b.style.color='#EAF3DE';setTimeout(()=>renderDash(),1500)}
+  if(!locs.length){showToast('⚠️ At least one location is required');return}
+  if(new Set(locs.map(l=>l.toLowerCase())).size!==locs.length){showToast('⚠️ Duplicate locations');return}
+  const ok=await dbSaveConfig({...S.config, locations:locs});
+  if(!ok){showToast('⚠️ Save failed');return}
+  // Drop any location an employee had that no longer exists.
+  for(const e of S.roster.filter(e=>(e.locations||[]).some(l=>!locs.includes(l))))
+    await dbSaveEmployee({...e, locations:e.locations.filter(l=>locs.includes(l))});
+  showToast('Locations saved ✓'); renderDash();
 }
 
+async function savePins(){
+  const mp=(document.getElementById('mp').value||'').replace(/\D/g,'');
+  const ap=(document.getElementById('ap').value||'').replace(/\D/g,'');
+  if(mp.length<4||ap.length<4){showToast('⚠️ PINs must be at least 4 digits');return}
+  if(mp===ap){showToast('⚠️ Manager and Admin PINs must differ');return}
+  const ok=await dbSaveConfig({...S.config, managerPin:mp, adminPin:ap});
+  showToast(ok?'PINs saved ✓':'⚠️ Save failed');
+}
 // ── EXPORT ────────────────────────────────────────────────────
 function exportCSV(mode){
   let punches,title;

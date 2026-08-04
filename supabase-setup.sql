@@ -8,6 +8,8 @@ create table if not exists tc_employees (
   id          text primary key,
   name        text not null,
   code        text,
+  roles       text[] not null default '{}',
+  locations   text[] not null default '{}',
   created_at  timestamptz default now()
 );
 
@@ -45,13 +47,23 @@ create table if not exists tc_config (
                 ],
   manager_pin   text not null default '1234',
   admin_pin     text not null default '5678',
-  lunch_roles   text[] not null default '{}',
+  lunch_roles           text[] not null default '{}',
+  lunch_clockout_roles  text[] not null default '{}',
   constraint single_row_only check (id = 1)
 );
 
 -- ── Migration for existing installs ───────────────────────────
 alter table tc_employees add column if not exists code text;
-alter table tc_config    add column if not exists lunch_roles text[] not null default '{}';
+alter table tc_employees add column if not exists roles     text[] not null default '{}';
+alter table tc_employees add column if not exists locations text[] not null default '{}';
+alter table tc_config    add column if not exists lunch_roles          text[] not null default '{}';
+alter table tc_config    add column if not exists lunch_clockout_roles text[] not null default '{}';
+
+-- Any existing role without a lunch button defaults to "clocks out for lunch",
+-- which preserves the missed-break (MBP) alerts you had before.
+update tc_config
+   set lunch_clockout_roles = array(select unnest(roles) except select unnest(lunch_roles))
+ where id = 1 and lunch_clockout_roles = '{}';
 
 -- Seed default config row
 insert into tc_config (id) values (1) on conflict (id) do nothing;
