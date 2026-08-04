@@ -222,10 +222,27 @@ function grossMs(eid,date){
   },0);
 }
 function hadNonLunchRole(eid,date){ return S.punches.some(p=>p.eid===eid&&dateKey(p.in)===date&&lunchMode(p.role)==='clockout'); }
+// A clock-out break only excuses the penalty if it STARTED before the employee
+// reached the 6-hour mark. Clocking out for lunch after that is a late break —
+// the penalty is already owed and has to stay on the record for payroll.
+function lunchGapBefore(eid,date,limitMs){
+  const ps=S.punches.filter(p=>p.eid===eid&&dateKey(p.in)===date).sort((a,b)=>new Date(a.in)-new Date(b.in));
+  let worked=0;
+  for(let i=0;i<ps.length;i++){
+    const p=ps[i]; if(!p.out) break;
+    worked+=new Date(p.out)-new Date(p.in);
+    const next=ps[i+1]; if(!next) break;
+    if(worked<limitMs && new Date(next.in)-new Date(p.out)>=30*60*1000) return true;
+  }
+  return false;
+}
+
 function dayAlerts(eid,date){
   const hrs=grossMs(eid,date)/3600000, fl=getFlag(eid,date);
-  const tookLunch=fl.lunch||hasLunchGap(eid,date);
-  return { mbp: hadNonLunchRole(eid,date)&&hrs>=6&&!tookLunch, ot: hrs>=8 };
+  // The lunch button clears the penalty whenever it is pressed; a clock-out only
+  // clears it if the break began before the 6-hour mark.
+  const excused=fl.lunch||lunchGapBefore(eid,date,6*3600000);
+  return { mbp: hadNonLunchRole(eid,date)&&hrs>=6&&!excused, ot: hrs>=8 };
 }
 function alertChips(eid,date){
   const a=dayAlerts(eid,date);
