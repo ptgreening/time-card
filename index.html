@@ -8,6 +8,9 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Time Clock" />
   <meta name="theme-color" content="#EF9F27" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/favicon.png" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.3.0/tabler-icons.min.css" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
@@ -59,11 +62,15 @@
     .chip-amber { background: #FAEEDA; color: #BA7517; }
     .chip-green { background: #EAF3DE; color: #3B6D11; }
     .del { background: none; border: none; color: #A32D2D; font-size: 12px; cursor: pointer; font-family: inherit; padding: 0; }
+    #offline-bar { display: none; background: #A32D2D; color: #FCEBEB; text-align: center; padding: 9px 16px; font-size: 13px; font-weight: 500; }
+    body.offline #offline-bar { display: block; }
     .spinner { width: 32px; height: 32px; border: 3px solid #E5E5EA; border-top-color: #EF9F27; border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
+
+<div id="offline-bar"><i class="ti ti-wifi-off"></i> No connection — you can't clock in or out until this clears</div>
 
 <!-- SPLASH -->
 <div id="splash" class="screen on" style="align-items:center;justify-content:center;gap:16px">
@@ -153,8 +160,10 @@ const SUPABASE_URL = 'https://aquhieypssovrzdrcixb.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxdWhpZXlwc3NvdnJ6ZHJjaXhiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5MDY3NzcsImV4cCI6MjEwMDQ4Mjc3N30.6rjpo6QZBmynLJ4bMdD_xXXKSdB3nHX1SmW-eVfCmno';
 // ═══════════════════════════════════════════════════════════════
 
-const { createClient } = supabase;
-const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+// The Supabase library comes from a CDN. Reading it at load time would kill the
+// whole script if that request failed, leaving a splash screen spinning forever,
+// so it is resolved in init() where the failure can be reported.
+let db = null;
 
 // ── STATE ────────────────────────────────────────────────────
 const DEFS = {
@@ -171,8 +180,26 @@ const S = {
   editEmp:null, editRole:null,
   showFlagSearch:false, resetTimer:null, resetInterval:null
 };
+// Opening the app as .../?kiosk=1 marks the device a shared kiosk for good, so a
+// bookmarked tablet keeps the setting even if its local storage gets wiped.
+(function(){
+  const q=new URLSearchParams(location.search);
+  if(q.get('kiosk')==='1') localStorage.setItem('tc_deviceType','shared');
+  if(q.get('kiosk')==='0') localStorage.removeItem('tc_deviceType');
+})();
 function deviceType(){ return localStorage.getItem('tc_deviceType')||''; }
 function isSharedDevice(){ return deviceType()==='shared'; }
+
+// Clock actions have to reach the database to count, so refuse them offline
+// rather than let someone walk away believing they clocked in.
+function requireOnline(){
+  if(navigator.onLine) return true;
+  showToast('⚠️ No connection — try again in a moment',3500);
+  return false;
+}
+function syncOnlineState(){ document.body.classList.toggle('offline',!navigator.onLine); }
+window.addEventListener('online',syncOnlineState);
+window.addEventListener('offline',syncOnlineState);
 
 // ── HELPERS ──────────────────────────────────────────────────
 const p2 = n => String(n).padStart(2,'0');
@@ -461,6 +488,7 @@ function buildMyStatus(eid){
 }
 
 async function takeLunch(){
+  if(!requireOnline())return;
   const eid=S.selId, today=todayKey();
   if(getFlag(eid,today).lunch){showToast('Lunch already taken today');return}
   const k=`${eid}_${today}`; const f={...(S.flags[k]||{}),lunch:true};
@@ -470,6 +498,7 @@ async function takeLunch(){
 
 async function doClockIn(){
   const emp=S.roster.find(e=>e.id===S.selId); if(!emp||!canClockIn(emp.id).ok)return;
+  if(!requireOnline())return;
   const role=document.getElementById('ci-r').value, loc=document.getElementById('ci-l').value;
   if(!empRoles(emp).includes(role)||!empLocs(emp).includes(loc)){showToast('⚠️ You are not assigned to that role or location');return;}
   const ok=await dbClockIn(emp.id,emp.name,role,loc);
@@ -480,6 +509,7 @@ async function doClockIn(){
 }
 
 async function doClockOut(pid){
+  if(!requireOnline())return;
   const ok=await dbClockOut(pid);
   if(!ok){showToast('⚠️ Save failed — check connection');return}
   if(S.isPersonalDevice){ showToast('Clocked out ✓'); renderEmpBody(); }
@@ -487,6 +517,7 @@ async function doClockOut(pid){
 }
 
 async function doSwitch(pid){
+  if(!requireOnline())return;
   const nr=document.getElementById('sw-r').value, nl=document.getElementById('sw-l').value;
   const emp=S.roster.find(e=>e.id===S.selId);
   if(!empRoles(emp).includes(nr)||!empLocs(emp).includes(nl)){showToast('⚠️ You are not assigned to that role or location');return;}
@@ -893,6 +924,14 @@ async function init(){
     document.getElementById('error-msg').textContent='App not configured yet. Open timeclock.html in a text editor and add your Supabase URL and key at the top of the script.';
     show('error-screen'); return;
   }
+  syncOnlineState();
+  if(typeof supabase==='undefined'){
+    document.getElementById('error-msg').textContent = navigator.onLine
+      ? 'Could not load the app. Try again in a moment.'
+      : 'You are offline. Connect to wifi or cell service and try again.';
+    show('error-screen'); return;
+  }
+  db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   try {
     await loadAll();
     setupRealtime();
@@ -912,6 +951,10 @@ setInterval(()=>{
   const sc=document.querySelector('.screen.on');
   if(sc?.id==='dashboard'&&S.tab==='status') renderDash();
 },30000);
+
+// Lets the app be installed to a home screen. The worker serves the page from
+// cache only when the network fails, so a new upload always wins.
+if('serviceWorker' in navigator) window.addEventListener('load',()=>navigator.serviceWorker.register('/service-worker.js').catch(()=>{}));
 
 init();
 </script>

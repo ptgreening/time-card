@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Install the Time Clock App</title>
+<link rel="icon" href="/favicon.png" />
+<meta name="theme-color" content="#EF9F27" />
+<meta property="og:title" content="Haunted Trail Time Clock" />
+<meta property="og:description" content="Install the time clock app on your phone. Takes about 30 seconds." />
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0E0E10;color:#F2F2F2;line-height:1.5;padding:28px 20px 64px}
+  .wrap{max-width:560px;margin:0 auto}
+  .logo{display:block;width:100%;max-width:340px;margin:0 auto 22px}
+  h1{font-size:26px;font-weight:700;text-align:center;letter-spacing:-.4px}
+  .sub{text-align:center;color:#A0A0A8;font-size:15px;margin-top:8px}
+  .card{background:#1A1A1E;border:1px solid #2C2C32;border-radius:14px;padding:20px;margin-top:18px}
+  .card h2{font-size:17px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:9px}
+  .tag{font-size:11px;font-weight:600;background:#EF9F27;color:#412402;padding:3px 8px;border-radius:20px;letter-spacing:.3px}
+  ol{margin:14px 0 0 20px}
+  ol li{margin-bottom:11px;font-size:15px}
+  .note{font-size:13px;color:#A0A0A8;margin-top:14px}
+  .btn{display:block;width:100%;padding:16px;border-radius:12px;border:none;font-size:16px;font-weight:600;
+       cursor:pointer;font-family:inherit;text-align:center;text-decoration:none;margin-top:16px}
+  .btn-amber{background:#EF9F27;color:#412402}
+  .btn-ghost{background:transparent;border:1px solid #3A3A42;color:#F2F2F2}
+  kbd{background:#2C2C32;border-radius:5px;padding:2px 7px;font-family:inherit;font-size:14px;white-space:nowrap}
+  .hide{display:none}
+  .why{margin-top:26px;font-size:14px;color:#A0A0A8}
+  .why summary{cursor:pointer;color:#EF9F27;font-weight:500;margin-bottom:8px}
+  .why p{margin-bottom:9px}
+  hr{border:none;border-top:1px solid #2C2C32;margin:26px 0}
+  .foot{text-align:center;font-size:13px;color:#75757E;margin-top:26px}
+  .foot a{color:#EF9F27}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <img src="/logo.png" alt="The Haunted Trail — Balboa Park" class="logo"
+       onerror="this.style.display='none'" />
+
+  <h1>Time Clock App</h1>
+  <p class="sub">Add it to your phone once. Then it's just an icon you tap — no website, no login page.</p>
+
+  <!-- ANDROID -->
+  <div id="android" class="card hide">
+    <h2>Android <span class="tag">YOUR PHONE</span></h2>
+    <p style="font-size:15px;color:#A0A0A8">Tap the button. Your phone will ask if you want to install — say yes.</p>
+    <button id="install-btn" class="btn btn-amber hide">Install the app</button>
+    <div id="android-manual">
+      <ol>
+        <li>Tap the <strong>⋮</strong> menu (three dots, top-right of Chrome).</li>
+        <li>Tap <kbd>Install app</kbd> — or <kbd>Add to Home screen</kbd>.</li>
+        <li>Tap <strong>Install</strong> to confirm.</li>
+      </ol>
+      <p class="note">Look for the Time Clock icon on your home screen when it's done.</p>
+    </div>
+  </div>
+
+  <!-- IPHONE -->
+  <div id="ios" class="card hide">
+    <h2>iPhone / iPad <span class="tag">YOUR PHONE</span></h2>
+    <p style="font-size:15px;color:#A0A0A8"><strong>You have to use Safari for this.</strong> If you're reading this in Chrome, Instagram, or Discord's built-in browser, it won't work — open it in Safari first.</p>
+    <ol>
+      <li>Tap the <strong>Share</strong> button — the square with an arrow pointing up. It's at the bottom of the screen, or top-right on an iPad.</li>
+      <li>Scroll down the list and tap <kbd>Add to Home Screen</kbd>.</li>
+      <li>Tap <strong>Add</strong> in the top-right corner.</li>
+    </ol>
+    <p class="note">Look for the Time Clock icon on your home screen when it's done.</p>
+  </div>
+
+  <!-- DESKTOP -->
+  <div id="desktop" class="card hide">
+    <h2>Computer</h2>
+    <p style="font-size:15px;color:#A0A0A8">You don't really need to install it on a computer — the website works fine. But if you want to:</p>
+    <button id="install-btn-desktop" class="btn btn-amber hide">Install the app</button>
+    <ol>
+      <li>In Chrome or Edge, look at the right end of the address bar.</li>
+      <li>Click the little install icon (a screen with a down arrow).</li>
+      <li>Click <strong>Install</strong>.</li>
+    </ol>
+  </div>
+
+  <a href="/" class="btn btn-ghost">Skip — just open the time clock</a>
+
+  <div class="why">
+    <hr />
+    <details>
+      <summary>Questions</summary>
+      <p><strong>Is this a real app from the app store?</strong><br />
+      No — and that's on purpose. It installs straight from this page, so there's nothing to search for and nothing to pay for. It behaves like any other app once it's on your home screen.</p>
+      <p><strong>Will it eat my storage or battery?</strong><br />
+      No. It's tiny and only does anything while you have it open.</p>
+      <p><strong>Does it track my location?</strong><br />
+      No. It records the time you clock in and out, and the location <em>you pick from the list</em> — nothing from your phone's GPS.</p>
+      <p><strong>Do I need my code?</strong><br />
+      Yes. Your manager gives you a 6-digit code, and you type it in to clock in or out. Ask your manager if you don't have one yet.</p>
+      <p><strong>Do I need internet?</strong><br />
+      Yes. Your clock-ins have to reach the system to count, so you need cell service or wifi when you clock in and out.</p>
+      <p><strong>It's not working.</strong><br />
+      Skip it and use the website — the button above works exactly the same. Then tell your manager.</p>
+    </details>
+  </div>
+
+  <p class="foot">The Haunted Trail · Balboa Park<br /><a href="/">hauntedtrail-timecard.netlify.app</a></p>
+</div>
+
+<script>
+// Show the section that matches the phone in the reader's hand. Everything else
+// stays available, just not first — most people never scroll.
+var ua = navigator.userAgent || '';
+var isIOS = /iPad|iPhone|iPod/.test(ua) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS lies
+var isAndroid = /Android/.test(ua);
+document.getElementById(isIOS ? 'ios' : isAndroid ? 'android' : 'desktop').classList.remove('hide');
+
+// Already installed? Then they opened this from the app itself.
+if (window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) {
+  document.querySelector('.wrap').innerHTML =
+    '<h1 style="margin-top:60px">You\'re all set</h1>' +
+    '<p class="sub">The app is already installed on this device.</p>' +
+    '<a href="/" class="btn btn-amber">Open the time clock</a>';
+}
+
+// Chrome hands us the install prompt; when it does, offer the real one-tap button
+// and hide the manual steps.
+var deferred = null;
+window.addEventListener('beforeinstallprompt', function (e) {
+  e.preventDefault();
+  deferred = e;
+  ['install-btn', 'install-btn-desktop'].forEach(function (id) {
+    var b = document.getElementById(id);
+    if (!b) return;
+    b.classList.remove('hide');
+    b.onclick = function () {
+      deferred.prompt();
+      deferred.userChoice.then(function (c) {
+        if (c.outcome === 'accepted') b.textContent = 'Installed ✓';
+      });
+    };
+  });
+  var m = document.getElementById('android-manual');
+  if (m) m.classList.add('hide');
+});
+
+window.addEventListener('appinstalled', function () {
+  var b = document.getElementById('install-btn');
+  if (b) b.textContent = 'Installed ✓';
+});
+</script>
+</body>
+</html>
