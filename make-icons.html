@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Icon Maker — Haunted Trail Time Clock</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0E0E10;color:#F2F2F2;
+       line-height:1.55;padding:32px 20px 80px}
+  .wrap{max-width:660px;margin:0 auto}
+  h1{font-size:25px;font-weight:700;letter-spacing:-.4px}
+  .sub{color:#A0A0A8;font-size:15px;margin-top:6px}
+  .card{background:#1A1A1E;border:1px solid #2C2C32;border-radius:14px;padding:22px;margin-top:20px}
+  h2{font-size:16px;font-weight:600;margin-bottom:10px}
+  #drop{border:2px dashed #3A3A42;border-radius:14px;padding:44px 20px;text-align:center;cursor:pointer;
+        transition:border-color .15s,background .15s}
+  #drop:hover,#drop.over{border-color:#EF9F27;background:#201A10}
+  #drop p{color:#A0A0A8;font-size:15px}
+  #drop strong{color:#EF9F27}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .swatch{width:42px;height:42px;border-radius:9px;border:2px solid #3A3A42;cursor:pointer}
+  .swatch.on{border-color:#EF9F27;box-shadow:0 0 0 3px rgba(239,159,39,.25)}
+  .previews{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-end;margin-top:6px}
+  .pv{text-align:center}
+  .pv canvas{display:block;width:112px;height:112px;background:#000}
+  .pv .lbl{font-size:12px;color:#A0A0A8;margin-top:8px}
+  .circle canvas{border-radius:50%}
+  .squircle canvas{border-radius:24px}
+  .btn{display:inline-block;padding:13px 18px;border-radius:11px;border:none;font-size:15px;font-weight:600;
+       cursor:pointer;font-family:inherit;background:#EF9F27;color:#412402;text-decoration:none;margin-top:10px}
+  .btn.ghost{background:transparent;border:1px solid #3A3A42;color:#F2F2F2}
+  .btn:disabled{opacity:.35;cursor:not-allowed}
+  ol{margin:10px 0 0 20px}
+  ol li{margin-bottom:7px;font-size:14px;color:#C8C8CE}
+  label.chk{display:flex;align-items:center;gap:9px;font-size:14px;color:#C8C8CE;margin-top:12px;cursor:pointer}
+  .hide{display:none}
+  .note{font-size:13px;color:#75757E;margin-top:14px}
+  input[type=range]{width:100%;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Icon Maker</h1>
+  <p class="sub">Drop the skull in. Download the icons. Upload them to GitHub. Nothing leaves your computer — this
+  page does everything right here in your browser.</p>
+
+  <div class="card">
+    <div id="drop">
+      <p><strong>Click here</strong> to pick your skull image<br />or drag it onto this box</p>
+      <input type="file" id="file" accept="image/*" class="hide" />
+    </div>
+    <label class="chk"><input type="checkbox" id="trim" checked /> Trim the empty space around the skull</label>
+    <div id="zoomwrap" class="hide">
+      <div style="font-size:13px;color:#A0A0A8;margin-top:14px">Size <span id="zoomval">88%</span></div>
+      <input type="range" id="zoom" min="50" max="100" value="88" />
+    </div>
+  </div>
+
+  <div class="card" id="bgcard">
+    <h2>Background</h2>
+    <div class="row" id="swatches"></div>
+    <p class="note">App icons can't be see-through, so they need a solid colour behind them. Black makes the skull pop.</p>
+  </div>
+
+  <div class="card">
+    <h2>Preview</h2>
+    <div class="previews">
+      <div class="pv circle"><canvas id="pv-circle" width="512" height="512"></canvas><div class="lbl">Android</div></div>
+      <div class="pv squircle"><canvas id="pv-sq" width="512" height="512"></canvas><div class="lbl">iPhone</div></div>
+      <div class="pv"><canvas id="pv-small" width="192" height="192" style="width:48px;height:48px"></canvas><div class="lbl">Actual size</div></div>
+    </div>
+    <p class="note">Android crops icons into a circle, so the skull is kept inside the safe zone. If it looks
+    cut off, drag the Size slider down.</p>
+  </div>
+
+  <div class="card">
+    <h2>Download</h2>
+    <p style="font-size:14px;color:#C8C8CE">Click the button and save all four. Your browser may ask permission to
+    download multiple files — say yes.</p>
+    <button class="btn" id="dl" disabled>Download all 4 icons</button>
+    <div id="links" class="row"></div>
+    <ol style="margin-top:18px">
+      <li>Save all four files.</li>
+      <li>Check the filenames — no <em>(1)</em> on the end.</li>
+      <li>Upload them to GitHub, replacing the placeholder ones.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+const BGS = ['#000000','#0E0E10','#1A1A1E','#412402','#EF9F27','#A32D2D','#FFFFFF'];
+let bg = '#000000', img = null;
+
+const $ = id => document.getElementById(id);
+
+// ── background swatches ──────────────────────────────────────
+BGS.forEach((c,i) => {
+  const d = document.createElement('div');
+  d.className = 'swatch' + (i === 0 ? ' on' : '');
+  d.style.background = c;
+  d.onclick = () => {
+    bg = c;
+    document.querySelectorAll('.swatch').forEach(s => s.classList.remove('on'));
+    d.classList.add('on');
+    draw();
+  };
+  $('swatches').appendChild(d);
+});
+
+// ── file input ───────────────────────────────────────────────
+$('drop').onclick = () => $('file').click();
+$('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('over'); };
+$('drop').ondragleave = () => $('drop').classList.remove('over');
+$('drop').ondrop = e => {
+  e.preventDefault(); $('drop').classList.remove('over');
+  if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]);
+};
+$('file').onchange = e => { if (e.target.files[0]) load(e.target.files[0]); };
+$('trim').onchange = draw;
+$('zoom').oninput = () => { $('zoomval').textContent = $('zoom').value + '%'; draw(); };
+
+function load(f) {
+  const r = new FileReader();
+  r.onload = ev => {
+    const i = new Image();
+    i.onload = () => {
+      img = i;
+      $('drop').innerHTML = '<p><strong>' + f.name + '</strong><br>' + i.width + ' × ' + i.height +
+                            ' — click to choose a different one</p>';
+      $('zoomwrap').classList.remove('hide');
+      $('dl').disabled = false;
+      draw();
+    };
+    i.onerror = () => alert("That file didn't look like an image. Try a PNG or JPG.");
+    i.src = ev.target.result;
+  };
+  r.readAsDataURL(f);
+}
+
+// Find the artwork inside the file, ignoring transparent or white margins, so a
+// logo saved with lots of padding still fills the icon.
+function contentBox(im) {
+  const N = 400;
+  const s = Math.min(N / im.width, N / im.height);
+  const w = Math.max(1, Math.round(im.width * s)), h = Math.max(1, Math.round(im.height * s));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const x = c.getContext('2d', { willReadFrequently: true });
+  x.drawImage(im, 0, 0, w, h);
+  let d;
+  try { d = x.getImageData(0, 0, w, h).data; }
+  catch (e) { return { x: 0, y: 0, w: im.width, h: im.height }; } // tainted canvas — skip trimming
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let px = 0; px < w; px++) {
+    const i = (y * w + px) * 4, a = d[i + 3];
+    const light = d[i] > 244 && d[i + 1] > 244 && d[i + 2] > 244;
+    if (a > 24 && !light) {
+      if (px < x0) x0 = px; if (px > x1) x1 = px;
+      if (y < y0) y0 = y;  if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < 0) return { x: 0, y: 0, w: im.width, h: im.height };
+  return { x: x0 / s, y: y0 / s, w: (x1 - x0 + 1) / s, h: (y1 - y0 + 1) / s };
+}
+
+function render(canvas, size, scale) {
+  const g = canvas.getContext('2d');
+  canvas.width = canvas.height = size;
+  g.fillStyle = bg;
+  g.fillRect(0, 0, size, size);
+  if (!img) return;
+  const b = $('trim').checked ? contentBox(img) : { x: 0, y: 0, w: img.width, h: img.height };
+  const box = size * scale;
+  const f = Math.min(box / b.w, box / b.h);
+  const dw = b.w * f, dh = b.h * f;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(img, b.x, b.y, b.w, b.h, (size - dw) / 2, (size - dh) / 2, dw, dh);
+}
+
+// "any" icons fill the tile; "maskable" keeps art inside the circle Android crops to.
+const zoom = () => $('zoom').value / 100;
+function draw() {
+  render($('pv-circle'), 512, zoom() * 0.78);
+  render($('pv-sq'), 512, zoom());
+  render($('pv-small'), 192, zoom());
+}
+draw();
+
+// ── download ─────────────────────────────────────────────────
+const OUT = [
+  ['icon-192.png',          192, () => zoom()],
+  ['icon-512.png',          512, () => zoom()],
+  ['icon-maskable-512.png', 512, () => zoom() * 0.78],
+  ['favicon.png',            64, () => zoom()]
+];
+
+$('dl').onclick = () => {
+  $('links').innerHTML = '';
+  const c = document.createElement('canvas');
+  OUT.forEach(([name, size, sc], i) => {
+    render(c, size, sc());
+    c.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name; a.className = 'btn ghost'; a.textContent = name;
+      $('links').appendChild(a);
+      // Staggered so browsers don't drop a burst of simultaneous downloads.
+      setTimeout(() => a.click(), i * 350);
+    }, 'image/png');
+  });
+};
+</script>
+</body>
+</html>
