@@ -1,0 +1,6 @@
+# Netlify rewrite rules.
+# 200 = serve this file but keep the pretty URL in the address bar.
+
+/install    /install.html   200
+/app        /install.html   200
+/kiosk      /index.html?kiosk=1   200
