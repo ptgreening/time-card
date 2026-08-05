@@ -81,9 +81,14 @@
 <!-- ERROR -->
 <div id="error-screen" class="screen" style="align-items:center;justify-content:center;padding:32px;text-align:center">
   <i class="ti ti-wifi-off" style="font-size:48px;color:#C7C7CC;margin-bottom:16px"></i>
-  <div style="font-size:18px;font-weight:600;margin-bottom:8px">Connection Error</div>
+  <div id="error-title" style="font-size:18px;font-weight:600;margin-bottom:8px">Connection Error</div>
   <div id="error-msg" style="font-size:14px;color:#6C6C70;margin-bottom:24px">Could not connect to the database.</div>
   <button onclick="location.reload()" class="btn btn-amber" style="max-width:200px">Try again</button>
+  <details style="margin-top:22px;max-width:340px;width:100%">
+    <summary style="font-size:12px;color:#8E8E93;cursor:pointer">Show technical details</summary>
+    <div id="error-detail" style="font-size:11px;color:#8E8E93;font-family:monospace;text-align:left;
+         background:#fff;border:1px solid #E5E5EA;border-radius:8px;padding:10px;margin-top:8px;word-break:break-word"></div>
+  </details>
 </div>
 
 <!-- HOME -->
@@ -294,7 +299,27 @@ async function loadAll(){
   if(pR.data) S.punches = pR.data.map(normPunch);
   if(fR.data){ S.flags={}; fR.data.forEach(f=>{ S.flags[`${f.employee_id}_${f.flag_date}`]={lunch:f.lunch,ncns:f.ncns,short:f.short_notice}; }); }
   if(cR.data) S.config={roles:cR.data.roles,locations:cR.data.locations,managerPin:cR.data.manager_pin,adminPin:cR.data.admin_pin,lunchRoles:cR.data.lunch_roles||[],lunchClockoutRoles:cR.data.lunch_clockout_roles||[]};
-  if(eR.error||pR.error) throw new Error('Load failed');
+  // Carry the real reason up instead of a generic failure — "check your internet"
+  // sends people looking in the wrong place when the database is the problem.
+  const err=eR.error||pR.error||fR.error;
+  if(err){ const e=new Error(err.message||'Load failed'); e.detail=err; throw e; }
+}
+
+// Turn a Supabase error into something a manager can act on.
+function explainDbError(err){
+  const raw=(err&&(err.message||''))+'';
+  const code=err&&err.detail&&err.detail.code;
+  const low=raw.toLowerCase();
+  if(!navigator.onLine) return ['You are offline','Connect to wifi or cell service, then try again.'];
+  if(low.includes('failed to fetch')||low.includes('networkerror')||low.includes('load failed'))
+    return ['Cannot reach the database','The database may be waking up or briefly unavailable. Wait a minute and try again.'];
+  if(code==='42P01'||low.includes('does not exist'))
+    return ['Database not set up','A table is missing. The setup SQL needs to be run in Supabase.'];
+  if(code==='42501'||low.includes('permission denied')||low.includes('row-level security'))
+    return ['Database permissions','The app is not allowed to read the tables. Permissions need fixing in Supabase.'];
+  if(low.includes('jwt')||low.includes('api key')||low.includes('invalid authentication'))
+    return ['Database key rejected','The API key in the app no longer matches the project.'];
+  return ['Could not load your data',raw||'Unknown error.'];
 }
 
 async function dbClockIn(eid,name,role,loc){
@@ -939,7 +964,11 @@ async function init(){
     if(savedId&&S.roster.find(e=>e.id===savedId)){S.selId=savedId;S.isPersonalDevice=true;openEmp(savedId);}
     else{goHome();}
   } catch(err){
-    document.getElementById('error-msg').textContent='Could not connect to the database. Check your internet connection and try again.';
+    const [title,msg]=explainDbError(err);
+    document.getElementById('error-title').textContent=title;
+    document.getElementById('error-msg').textContent=msg;
+    const d=document.getElementById('error-detail');
+    if(d) d.textContent=(err&&err.message)||String(err);
     show('error-screen');
   }
 }
