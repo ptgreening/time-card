@@ -10,7 +10,8 @@
  *            rather than return stale punches.
  */
 
-const CACHE = 'timeclock-v1';
+// Bumping this name drops every previously cached file on the next visit.
+const CACHE = 'timeclock-v2';
 
 const SHELL = [
   '/',
