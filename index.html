@@ -116,7 +116,7 @@
     <span style="width:60px"></span>
   </div>
   <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px">
-    <div id="ec-msg" style="font-size:15px;color:#6C6C70;margin-bottom:28px">Enter your 6-digit code</div>
+    <div id="ec-msg" style="font-size:15px;color:#6C6C70;margin-bottom:28px">Enter your code</div>
     <div id="ec-dots" style="display:flex;gap:12px;margin-bottom:36px"></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:260px" id="ec-pad"></div>
   </div>
@@ -176,6 +176,9 @@ const DEFS = {
   locations: ['Main Site','Storage Lot A','Storage Lot B','Office'],
   managerPin: '1234', adminPin: '5678', lunchRoles: [], lunchClockoutRoles: []
 };
+// Codes may be any length in this range, and may differ per person — the keypad
+// sizes itself to whatever code the selected employee actually has.
+const CODE_MIN = 4, CODE_MAX = 8;
 const S = {
   roster:[], punches:[], flags:{}, config:{...DEFS},
   selId:null, isAdmin:false, isPersonalDevice:false,
@@ -424,20 +427,21 @@ function openEmp(eid){
   if(!emp.code){ S.codeOk=true; showEmpScreen(); return; }
   S.empCodeBuf=''; S.empCodeErr=false;
   document.getElementById('ec-name').textContent=emp.name;
-  document.getElementById('ec-msg').textContent='Enter your 6-digit code';
+  document.getElementById('ec-msg').textContent=`Enter your ${emp.code.length}-digit code`;
   buildEmpCode(); show('emp-code');
 }
 function buildEmpCode(){
   const dots=document.getElementById('ec-dots'),pad=document.getElementById('ec-pad'); if(!dots||!pad)return;
-  dots.innerHTML=Array.from({length:6}).map((_,i)=>`<div style="width:14px;height:14px;border-radius:50%;background:${i<S.empCodeBuf.length?(S.empCodeErr?'#E53935':'#EF9F27'):'#E5E5EA'}"></div>`).join('');
+  const len=(S.roster.find(e=>e.id===S.selId)?.code||'').length||CODE_MAX;
+  dots.innerHTML=Array.from({length:len}).map((_,i)=>`<div style="width:14px;height:14px;border-radius:50%;background:${i<S.empCodeBuf.length?(S.empCodeErr?'#E53935':'#EF9F27'):'#E5E5EA'}"></div>`).join('');
   pad.innerHTML=['1','2','3','4','5','6','7','8','9','','0','⌫'].map(d=>`<button class="pin-key" onclick="${d==='⌫'?'ecBack()':d?`ecDigit('${d}')`:''}">`+d+'</button>').join('');
 }
 function ecDigit(d){
-  if(S.empCodeBuf.length>=6)return;
+  const emp=S.roster.find(e=>e.id===S.selId); if(!emp)return;
+  if(S.empCodeBuf.length>=emp.code.length)return;
   S.empCodeBuf+=d; buildEmpCode();
-  if(S.empCodeBuf.length<6)return;
-  const emp=S.roster.find(e=>e.id===S.selId);
-  if(emp&&S.empCodeBuf===emp.code){ S.codeOk=true; setTimeout(showEmpScreen,100); return; }
+  if(S.empCodeBuf.length<emp.code.length)return;
+  if(S.empCodeBuf===emp.code){ S.codeOk=true; setTimeout(showEmpScreen,100); return; }
   S.empCodeErr=true; buildEmpCode();
   document.getElementById('ec-msg').textContent='Incorrect code — try again';
   setTimeout(()=>{S.empCodeBuf='';S.empCodeErr=false;buildEmpCode()},700);
@@ -795,9 +799,9 @@ function buildEmpEditor(){
       <div style="font-weight:500;font-size:16px;margin-bottom:4px">${e.isNew?'Add new employee':'Edit employee'}</div>
       <label>Full name</label>
       <input id="ee-name" value="${esc(e.name)}" placeholder="Jane Doe" autocomplete="off"/>
-      <label>6-digit code</label>
-      <input id="ee-code" value="${esc(e.code||'')}" inputmode="numeric" maxlength="6" placeholder="Leave blank for no code" autocomplete="off" style="font-family:monospace;font-size:18px;letter-spacing:4px"/>
-      <div style="font-size:12px;color:#6C6C70;margin-top:4px">They type this on the keypad to clock in or out.</div>
+      <label>Clock-in code</label>
+      <input id="ee-code" value="${esc(e.code||'')}" inputmode="numeric" maxlength="${CODE_MAX}" placeholder="Leave blank for no code" autocomplete="off" style="font-family:monospace;font-size:18px;letter-spacing:4px"/>
+      <div style="font-size:12px;color:#6C6C70;margin-top:4px">${CODE_MIN} to ${CODE_MAX} digits — they type this on the keypad to clock in or out. Codes can be different lengths for different people.</div>
     </div>
     <div class="card">
       <div style="font-size:13px;font-weight:500;margin-bottom:2px">Roles</div>
@@ -821,7 +825,7 @@ async function saveEmpEditor(){
   const roles=[...document.querySelectorAll('.ee-role:checked')].map(c=>c.value);
   const locations=[...document.querySelectorAll('.ee-loc:checked')].map(c=>c.value);
   if(!name){showToast('⚠️ Name is required');return}
-  if(code&&code.length!==6){showToast('⚠️ Code must be exactly 6 digits');return}
+  if(code&&(code.length<CODE_MIN||code.length>CODE_MAX)){showToast(`⚠️ Code must be ${CODE_MIN}–${CODE_MAX} digits`);return}
   if(S.roster.some(x=>x.id!==e.id&&x.name.toLowerCase()===name.toLowerCase())){showToast('⚠️ Another employee already has that name');return}
   if(code&&S.roster.some(x=>x.id!==e.id&&x.code===code)){showToast('⚠️ Another employee already uses that code');return}
   if(!roles.length){showToast('⚠️ Assign at least one role');return}
