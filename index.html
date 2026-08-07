@@ -226,7 +226,7 @@ function netMs(eid,date){
   const ms = S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.in)===date).reduce((s,p)=>s+(new Date(p.out)-new Date(p.in)),0);
   return Math.max(0, ms-(getFlag(eid,date).lunch ? 30*60*1000 : 0));
 }
-function normPunch(p){ return { id:p.id, eid:p.employee_id, name:p.employee_name, role:p.role, loc:p.location, in:p.clock_in, out:p.clock_out }; }
+function normPunch(p){ return { id:p.id, eid:p.employee_id, name:p.employee_name, role:p.role, loc:p.location, in:p.clock_in, out:p.clock_out, lunchOut:!!p.lunch_out }; }
 function lunchRoles(){ return S.config.lunchRoles||[]; }
 function lunchClockoutRoles(){ return S.config.lunchClockoutRoles||[]; }
 function roleHasLunchBtn(role){ return lunchRoles().includes(role); }
@@ -325,13 +325,13 @@ function explainDbError(err){
 async function dbClockIn(eid,name,role,loc){
   const id=genId(), now=new Date().toISOString();
   const {error}=await db.from('tc_punches').insert({id,employee_id:eid,employee_name:name,role,location:loc,clock_in:now});
-  if(!error) S.punches.push({id,eid,name,role,loc,in:now,out:null});
+  if(!error) S.punches.push({id,eid,name,role,loc,in:now,out:null,lunchOut:false});
   return !error;
 }
-async function dbClockOut(punchId){
+async function dbClockOut(punchId,forLunch){
   const now=new Date().toISOString();
-  const {error}=await db.from('tc_punches').update({clock_out:now}).eq('id',punchId);
-  if(!error) S.punches=S.punches.map(p=>p.id===punchId?{...p,out:now}:p);
+  const {error}=await db.from('tc_punches').update({clock_out:now,lunch_out:!!forLunch}).eq('id',punchId);
+  if(!error) S.punches=S.punches.map(p=>p.id===punchId?{...p,out:now,lunchOut:!!forLunch}:p);
   return !error;
 }
 async function dbSwitchRole(punchId,newRole,newLoc){
@@ -342,7 +342,7 @@ async function dbSwitchRole(punchId,newRole,newLoc){
     db.from('tc_punches').insert({id:newId,employee_id:old.eid,employee_name:old.name,role:newRole,location:newLoc,clock_in:now})
   ]);
   S.punches=S.punches.map(p=>p.id===punchId?{...p,out:now}:p);
-  S.punches.push({id:newId,eid:old.eid,name:old.name,role:newRole,loc:newLoc,in:now,out:null});
+  S.punches.push({id:newId,eid:old.eid,name:old.name,role:newRole,loc:newLoc,in:now,out:null,lunchOut:false});
 }
 async function dbEditTime(punchId,field,newIso){
   const col=field==='in'?'clock_in':'clock_out';
@@ -451,10 +451,13 @@ function showEmpScreen(){
   renderEmpBody(); show('employee');
 }
 
+// The 30-minute lockout exists to protect the minimum meal break, so it applies
+// only after someone clocks out FOR LUNCH. Ending a shift — or clocking out after
+// already taking lunch — never blocks a later clock-in.
 function canClockIn(eid){
   const today=todayKey();
   const outs=S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.out)===today).sort((a,b)=>new Date(b.out)-new Date(a.out));
-  if(!outs.length)return{ok:true};
+  if(!outs.length||!outs[0].lunchOut)return{ok:true};
   const diff=Date.now()-new Date(outs[0].out).getTime();
   if(diff<30*60*1000){const wu=new Date(new Date(outs[0].out).getTime()+30*60*1000);return{ok:false,wu}}
   return{ok:true};
@@ -487,9 +490,14 @@ function renderEmpBody(){
     return;
   }
   if(act){
-    const canLunch=roleHasLunchBtn(act.role)&&!getFlag(emp.id,todayKey()).lunch;
-    const lunchBtn=canLunch?`<button class="btn btn-amber" onclick="takeLunch()"><i class="ti ti-tools-kitchen-2"></i> Take lunch (30 min)</button>`:'';
-    body.innerHTML=`<div class="active-card"><div class="ml" style="color:#3B6D11;margin-bottom:8px">Currently clocked in</div><div style="font-size:20px;font-weight:500;margin-bottom:2px">${act.role}</div><div style="font-size:13px;color:#6C6C70;margin-bottom:14px">${act.loc}</div><div style="display:flex;gap:24px"><div><div class="ml">Clock in</div><div style="font-size:15px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div><div><div class="ml">Elapsed</div><div id="el-val" style="font-size:15px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div></div></div>${S.switchMode?`<div class="card"><div style="font-weight:500;margin-bottom:4px">Switch to…</div>${picker('sw-r','New role',myRoles)}${picker('sw-l','Location',myLocs)}<button class="btn btn-amber" onclick="doSwitch('${act.id}')">Confirm switch</button><button class="btn btn-ghost" onclick="S.switchMode=false;renderEmpBody()">Cancel</button></div>`:`${lunchBtn}<button class="btn btn-ghost" onclick="S.switchMode=true;renderEmpBody()"><i class="ti ti-refresh"></i> Switch role / location</button><button class="btn btn-red" onclick="doClockOut('${act.id}')">Clock out</button>`}${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
+    const tookLunch=getFlag(emp.id,todayKey()).lunch||hasLunchGap(emp.id,todayKey());
+    const mode=lunchMode(act.role);
+    // Button roles log lunch without leaving; clock-out roles punch out for it.
+    const lunchBtn=tookLunch?''
+      :mode==='button'?`<button class="btn btn-amber" onclick="takeLunch()"><i class="ti ti-tools-kitchen-2"></i> Take lunch (30 min)</button>`
+      :mode==='clockout'?`<button class="btn btn-amber" onclick="doClockOut('${act.id}',true)"><i class="ti ti-tools-kitchen-2"></i> Start lunch (clock out 30 min)</button>`
+      :'';
+    body.innerHTML=`<div class="active-card"><div class="ml" style="color:#3B6D11;margin-bottom:8px">Currently clocked in</div><div style="font-size:20px;font-weight:500;margin-bottom:2px">${act.role}</div><div style="font-size:13px;color:#6C6C70;margin-bottom:14px">${act.loc}</div><div style="display:flex;gap:24px"><div><div class="ml">Clock in</div><div style="font-size:15px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div><div><div class="ml">Elapsed</div><div id="el-val" style="font-size:15px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div></div></div>${S.switchMode?`<div class="card"><div style="font-weight:500;margin-bottom:4px">Switch to…</div>${picker('sw-r','New role',myRoles)}${picker('sw-l','Location',myLocs)}<button class="btn btn-amber" onclick="doSwitch('${act.id}')">Confirm switch</button><button class="btn btn-ghost" onclick="S.switchMode=false;renderEmpBody()">Cancel</button></div>`:`${lunchBtn}<button class="btn btn-ghost" onclick="S.switchMode=true;renderEmpBody()"><i class="ti ti-refresh"></i> Switch role / location</button><button class="btn btn-red" onclick="doClockOut('${act.id}')">${lunchBtn?'Clock out — done for the day':'Clock out'}</button>`}${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
   } else {
     const chk=canClockIn(emp.id);
     body.innerHTML=`${!chk.ok?`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-clock"></i> Break in progress</div><div style="font-size:13px;color:#854F0B">You can clock back in after <strong>${chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</strong></div></div>`:''}<div class="card"><div style="font-size:14px;color:#6C6C70;margin-bottom:4px">${myRoles.length===1&&myLocs.length===1?'Confirm and clock in':'Select your role and location'}</div>${picker('ci-r','Role',myRoles)}${picker('ci-l','Location',myLocs)}</div><button class="btn btn-green" onclick="doClockIn()" ${!chk.ok?'disabled style="opacity:.4;cursor:not-allowed"':''}>Clock in</button>${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
@@ -533,12 +541,13 @@ async function doClockIn(){
   else { offerRememberMe(emp,role); }
 }
 
-async function doClockOut(pid){
+async function doClockOut(pid,forLunch){
   if(!requireOnline())return;
-  const ok=await dbClockOut(pid);
+  const ok=await dbClockOut(pid,forLunch);
   if(!ok){showToast('⚠️ Save failed — check connection');return}
-  if(S.isPersonalDevice){ showToast('Clocked out ✓'); renderEmpBody(); }
-  else { finishAndGoHome('Clocked out — have a great day!'); }
+  const msg=forLunch?'On lunch — clock back in after 30 minutes':'Clocked out — have a great day!';
+  if(S.isPersonalDevice){ showToast(msg); renderEmpBody(); }
+  else { finishAndGoHome(msg); }
 }
 
 async function doSwitch(pid){

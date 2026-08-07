@@ -4,7 +4,11 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Install the Time Clock App</title>
+<!-- Without these the browser has no app to install and falls back to a plain
+     bookmark of THIS page, named after this page's title. -->
+<link rel="manifest" href="/manifest.json" />
 <link rel="icon" href="/favicon.png" />
+<link rel="apple-touch-icon" href="/icon-192.png" />
 <meta name="theme-color" content="#EF9F27" />
 <meta property="og:title" content="Haunted Trail Time Clock" />
 <meta property="og:description" content="Install the time clock app on your phone. Takes about 30 seconds." />
@@ -108,6 +112,12 @@
 </div>
 
 <script>
+// Chrome only offers a real install once a service worker controls the page, so
+// register it here too — most people meet the app on this page first.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/service-worker.js').catch(function () {});
+}
+
 // Show the section that matches the phone in the reader's hand. Everything else
 // stays available, just not first — most people never scroll.
 var ua = navigator.userAgent || '';
