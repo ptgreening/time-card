@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The blank sheet the stylus will draw on. Slightly off-white, easier on the eyes
+         than pure white under fluorescent light. -->
+    <color name="canvas_background">#FFF7F4EF</color>
+    <color name="ic_launcher_background">#FF2F5D50</color>
+</resources>
