@@ -1,0 +1,5 @@
+# Employee punch data pulled from Supabase for report generation.
+# Real names and hours — regenerate from the database rather than committing it.
+punches.json
+days.json
+*.xlsx
