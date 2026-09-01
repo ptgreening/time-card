@@ -2,6 +2,7 @@ import json, datetime as dt
 from collections import defaultdict, OrderedDict
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.formatting.rule import CellIsRule
 from openpyxl.utils import get_column_letter
 
 D = json.load(open('days.json'))
@@ -17,6 +18,7 @@ TOT_F   = PatternFill('solid', fgColor='D9E2F3')
 FLAG_F  = PatternFill('solid', fgColor='FCE4E4')
 HOLD_F  = PatternFill('solid', fgColor='FFF2CC')
 YEL_F   = PatternFill('solid', fgColor='FFFF00')
+EDGE_F  = PatternFill('solid', fgColor='FFE08A')
 TITLE   = Font(name=ARIAL, size=14, bold=True)
 HDR     = Font(name=ARIAL, size=10, bold=True, color='FFFFFF')
 BASE    = Font(name=ARIAL, size=10)
@@ -73,6 +75,9 @@ note('  5 to 6 hours','The requirement may be waived by mutual consent, and ever
 note('  Over 10 hours','A second meal period is required. Between 10 and 12 hours it is covered by the same '
      'signed waiver, provided the first meal was actually taken, so it is not flagged.')
 note('  Over 12 hours','The second meal can no longer be waived. Missing it is a violation.')
+note('Over By (minutes)','How far past the legal line the violation actually is. A shift of 6 hours and 9 '
+     'seconds shows 0.2; a shift with no meal at 11.6 hours shows 335. Anything within 15 minutes is shaded '
+     'amber — those are worth a manager reading the punches before the penalty is paid.')
 note('Penalty Hrs','One hour of pay at the regular rate per workday, under Labor Code 226.7. Capped at one hour '
      'per day for meal violations no matter how many occur that day.')
 note('REVIEW rows','The lunch button records THAT a meal was taken but not WHEN or for HOW LONG, so compliance '
@@ -107,9 +112,9 @@ for x in D: periods[pstart(x['date'])].append(x)
 
 COLS=['Employee','Date','Day','Clock In','Meal Out','Meal In','Clock Out',
       'Gross Hrs','Meal Deduct','Net Hrs','Meals','Meal Mins','Meal Began\n(hrs into shift)',
-      'Meal Break Compliance (CA)','Penalty Hrs','OT DAY','Notes']
-W=[22,11,6,11,11,11,11,9,9,9,7,9,11,48,9,8,30]
-NCOL=17
+      'Meal Break Compliance (CA)','Penalty Hrs','Over By\n(minutes)','OT DAY','Notes']
+W=[22,11,6,11,11,11,11,9,9,9,7,9,11,44,9,10,8,30]
+NCOL=18
 
 for ps in sorted(periods):
     pe=ps+dt.timedelta(days=6)
@@ -162,13 +167,21 @@ for ps in sorted(periods):
                     f'IF(M{row}>5,"VIOLATION - meal began after 5th hour",'
                     f'IF(AND(J{row}>12,K{row}<2),"VIOLATION - no 2nd meal, over 12 hrs",""))))))').font=BASE
                 ws.cell(row,15,f'=IF(LEFT(N{row},9)="VIOLATION",1,0)').font=RED
-                ws.cell(row,16,f'=IF(J{row}>8,"OT","")').font=RED
+                # How far past the line a violation actually is, so a manager can
+                # tell nine seconds over from an hour over.
+                ws.cell(row,16,
+                    f'=IF(O{row}=0,"",'
+                    f'IF(N{row}="VIOLATION - no meal taken, over 6 hrs",(J{row}-6)*60,'
+                    f'IF(N{row}="VIOLATION - meal began after 5th hour",(M{row}-5)*60,'
+                    f'IF(N{row}="VIOLATION - meal under 30 minutes",30-L{row},'
+                    f'IF(N{row}="VIOLATION - no 2nd meal, over 12 hrs",(J{row}-12)*60,"")))))').font=BASE
+                ws.cell(row,17,f'=IF(J{row}>8,"OT","")').font=RED
                 if x['note']: ws.cell(row,NCOL,x['note']).font=MUTED
                 netcells.append(f'J{row}')
-            for col in (8,9,10,12,13,15):
-                ws.cell(row,col).number_format='0.00'
+            for col in (8,9,10,12,13,15,16):
+                ws.cell(row,col).number_format='0.0' if col==16 else '0.00'
                 ws.cell(row,col).alignment=Alignment(horizontal='center')
-            for col in (3,11,16): ws.cell(row,col).alignment=Alignment(horizontal='center')
+            for col in (3,11,16,17): ws.cell(row,col).alignment=Alignment(horizontal='center')
             ws.cell(row,14).alignment=Alignment(horizontal='left')
             for col in range(1,NCOL+1): ws.cell(row,col).border=BOX
             row+=1
@@ -185,13 +198,16 @@ for ps in sorted(periods):
         ws.cell(row,15,f'=SUM(O{first}:O{row-1})').font=RED
         ws.cell(row,15).number_format='0'; ws.cell(row,15).alignment=Alignment(horizontal='center')
         ws.cell(row,14,'Meal penalty hours owed, this period ->').font=BOLD
-        ws.cell(row,16,f'=IF(J{row}>40,"OVER 40","")').font=RED
-        ws.cell(row,16).alignment=Alignment(horizontal='center')
+        ws.cell(row,17,f'=IF(J{row}>40,"OVER 40","")').font=RED
+        ws.cell(row,17).alignment=Alignment(horizontal='center')
         held_n=sum(1 for x in recs if x['review'])
         if held_n: ws.cell(row,NCOL,f'{held_n} day(s) held - total is incomplete').font=RED
         for col in range(1,NCOL+1):
             ws.cell(row,col).fill=TOT_F; ws.cell(row,col).border=BOX
         row+=2
+    if row>4:
+        ws.conditional_formatting.add(f'P4:P{row}',
+            CellIsRule(operator='between', formula=['0.0001','15'], fill=EDGE_F))
     ws.sheet_view.showGridLines=False
 
 # ── NEEDS REVIEW ──────────────────────────────────────────────

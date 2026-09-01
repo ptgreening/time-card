@@ -65,7 +65,14 @@ for ws in wb:
             txt = compliance(net, meals, ded, mins, began)
             CALC[(ws.title, f'N{row}')] = txt
             CALC[(ws.title, f'O{row}')] = 1 if txt.startswith('VIOLATION') else 0
-            CALC[(ws.title, f'P{row}')] = 'OT' if net > 8 else ''
+            margin = ''
+            if txt.startswith('VIOLATION'):
+                if 'over 6 hrs'   in txt: margin = (net - 6) * 60
+                elif 'after 5th'  in txt: margin = (began - 5) * 60
+                elif 'under 30'   in txt: margin = 30 - mins
+                elif 'over 12'    in txt: margin = (net - 12) * 60
+            CALC[(ws.title, f'P{row}')] = margin
+            CALC[(ws.title, f'Q{row}')] = 'OT' if net > 8 else ''
         # totals rows
         for col in (8,9,10,15):
             v = ws.cell(row,col).value
@@ -75,9 +82,9 @@ for ws in wb:
                 CALC[(ws.title, f'{get_column_letter(col)}{row}')] = sum(
                     x for r in range(a,b+1)
                     if isinstance(x := CALC.get((ws.title,f'{L}{r}')), (int,float)))
-        v = ws.cell(row,16).value
+        v = ws.cell(row,17).value
         if isinstance(v,str) and v.startswith('=IF(J') and 'OVER 40' in v:
-            CALC[(ws.title, f'P{row}')] = 'OVER 40' if (CALC.get((ws.title,f'J{row}')) or 0) > 40 else ''
+            CALC[(ws.title, f'Q{row}')] = 'OVER 40' if (CALC.get((ws.title,f'J{row}')) or 0) > 40 else ''
 
 # ── write the values into the sheet XML ──
 NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
