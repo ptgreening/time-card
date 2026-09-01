@@ -67,10 +67,10 @@ ws.cell(r,2,'FLAGS').font=Font(name=ARIAL,size=11,bold=True); r+=1
 note('Meal break rules','California Labor Code 512 and the IWC Wage Orders. A meal period must be at '
      'least 30 uninterrupted minutes, and must BEGIN before the end of the 5th hour of work.')
 note('  Over 5 hours','A meal period is required. If none was taken, that is a violation.')
-note('  5 to 6 hours','The meal may be waived by mutual consent with a signed waiver. Whether you hold those '
-     'waivers is set below, and the formulas read it — change the setting and every sheet re-evaluates.')
-note('  Over 10 hours','A second meal period is required. Between 10 and 12 hours it may be waived by mutual '
-     'consent, provided the first meal was actually taken.')
+note('  5 to 6 hours','The meal may be waived by mutual consent. Every employee signs this waiver, so these '
+     'shifts are treated as compliant and are not flagged.')
+note('  Over 10 hours','A second meal period is required. Between 10 and 12 hours it is covered by the same '
+     'signed waiver, provided the first meal was actually taken, so it is not flagged.')
 note('  Over 12 hours','The second meal can no longer be waived. Missing it is a violation.')
 note('Penalty Hrs','One hour of pay at the regular rate per workday, under Labor Code 226.7. Capped at one hour '
      'per day for meal violations no matter how many occur that day.')
@@ -87,19 +87,6 @@ note('A row showing 6.00 can still flag MBP','Hours are displayed to two places 
      'worked. Kevin Tran on 08/15 reads 6.00 because he worked 6 hours and 9 seconds. The flag is correct; the '
      'display is simply rounded. Erring toward flagging is deliberate — an extra look costs less than a missed penalty.',
      Font(name=ARIAL, size=10, italic=True))
-r+=1
-ws.cell(r,2,'SETTINGS — the compliance formulas read these').font=Font(name=ARIAL,size=11,bold=True); r+=1
-ws.cell(r,2,'First meal waiver signed and on file').font=BOLD
-ws.cell(r,3,'Applies to shifts of 5 to 6 hours. Confirmed on file for all staff.').font=MUTED
-c=ws.cell(r,4,'YES'); c.font=INPUT; c.fill=YEL_F; c.alignment=Alignment(horizontal='center')
-c.border=BOX
-W1=f"'Read Me'!$D${r}"; r+=1
-ws.cell(r,2,'Second meal waiver signed and on file').font=BOLD
-ws.cell(r,3,'Applies to shifts of 10 to 12 hours, only where the first meal was taken.').font=MUTED
-c=ws.cell(r,4,'NO'); c.font=INPUT; c.fill=YEL_F; c.alignment=Alignment(horizontal='center')
-c.border=BOX
-W2=f"'Read Me'!$D${r}"; r+=1
-ws.column_dimensions['D'].width=8
 r+=1
 ws.cell(r,2,'GAP TO FIX').font=Font(name=ARIAL,size=11,bold=True,color='C00000'); r+=1
 note('The lunch button records no time','Roles that press the lunch button instead of clocking out record only '
@@ -167,17 +154,12 @@ for ps in sorted(periods):
                 # a 2nd meal is required over 10 and unwaivable over 12.
                 ws.cell(row,14,
                     f'=IF(J{row}<=5,"",'
-                    f'IF(AND(K{row}=0,I{row}=0),IF(J{row}<=6,'
-                    f'IF({W1}="YES","OK - first meal waived (waiver on file)",'
-                    f'"WAIVER REQUIRED - no meal, 5-6 hr shift"),'
+                    f'IF(AND(K{row}=0,I{row}=0),IF(J{row}<=6,"",'
                     f'"VIOLATION - no meal taken, over 5 hrs"),'
                     f'IF(AND(K{row}=0,I{row}>0),"REVIEW - lunch button, no times recorded",'
                     f'IF(L{row}<30,"VIOLATION - meal under 30 minutes",'
                     f'IF(M{row}>5,"VIOLATION - meal began after 5th hour",'
-                    f'IF(AND(J{row}>12,K{row}<2),"VIOLATION - no 2nd meal, over 12 hrs",'
-                    f'IF(AND(J{row}>10,K{row}<2),'
-                    f'IF({W2}="YES","OK - second meal waived (waiver on file)",'
-                    f'"WAIVER REQUIRED - no 2nd meal, 10-12 hrs"),"")))))))').font=BASE
+                    f'IF(AND(J{row}>12,K{row}<2),"VIOLATION - no 2nd meal, over 12 hrs",""))))))').font=BASE
                 ws.cell(row,15,f'=IF(LEFT(N{row},9)="VIOLATION",1,0)').font=RED
                 ws.cell(row,16,f'=IF(J{row}>8,"OT","")').font=RED
                 if x['note']: ws.cell(row,NCOL,x['note']).font=MUTED

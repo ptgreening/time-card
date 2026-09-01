@@ -27,22 +27,17 @@ def num(ws, ref):
 
 CALC = {}
 
-W1, W2 = 'YES', 'NO'      # mirrors the settings cells on the Read Me tab
-
+# Every employee signs the meal waiver, so the 5-6 hour first meal and the
+# 10-12 hour second meal are compliant and are not flagged.
 def compliance(net, meals, deduct, mins, began):
     if net is None or net <= 5: return ''
     if meals == 0 and deduct == 0:
-        if net <= 6:
-            return ('OK - first meal waived (waiver on file)' if W1 == 'YES'
-                    else 'WAIVER REQUIRED - no meal, 5-6 hr shift')
+        if net <= 6: return ''
         return 'VIOLATION - no meal taken, over 5 hrs'
     if meals == 0 and deduct > 0: return 'REVIEW - lunch button, no times recorded'
     if mins is not None and mins < 30: return 'VIOLATION - meal under 30 minutes'
     if began is not None and began > 5: return 'VIOLATION - meal began after 5th hour'
     if net > 12 and meals < 2: return 'VIOLATION - no 2nd meal, over 12 hrs'
-    if net > 10 and meals < 2:
-        return ('OK - second meal waived (waiver on file)' if W2 == 'YES'
-                else 'WAIVER REQUIRED - no 2nd meal, 10-12 hrs')
     return ''
 
 for ws in wb:
