@@ -66,9 +66,10 @@ r+=1
 ws.cell(r,2,'FLAGS').font=Font(name=ARIAL,size=11,bold=True); r+=1
 note('Meal break rules','California Labor Code 512 and the IWC Wage Orders. A meal period must be at '
      'least 30 uninterrupted minutes, and must BEGIN before the end of the 5th hour of work.')
-note('  Over 5 hours','A meal period is required. If none was taken, that is a violation.')
-note('  5 to 6 hours','The meal may be waived by mutual consent. Every employee signs this waiver, so these '
-     'shifts are treated as compliant and are not flagged.')
+note('  Over 5 hours','A meal period is required by law.')
+note('  5 to 6 hours','The requirement may be waived by mutual consent, and every employee signs that waiver, '
+     'so these shifts are compliant and are not flagged. In practice this means a missing meal is only flagged '
+     'once a shift passes 6.00 hours, where the waiver stops applying.')
 note('  Over 10 hours','A second meal period is required. Between 10 and 12 hours it is covered by the same '
      'signed waiver, provided the first meal was actually taken, so it is not flagged.')
 note('  Over 12 hours','The second meal can no longer be waived. Missing it is a violation.')
@@ -155,7 +156,7 @@ for ps in sorted(periods):
                 ws.cell(row,14,
                     f'=IF(J{row}<=5,"",'
                     f'IF(AND(K{row}=0,I{row}=0),IF(J{row}<=6,"",'
-                    f'"VIOLATION - no meal taken, over 5 hrs"),'
+                    f'"VIOLATION - no meal taken, over 6 hrs"),'
                     f'IF(AND(K{row}=0,I{row}>0),"REVIEW - lunch button, no times recorded",'
                     f'IF(L{row}<30,"VIOLATION - meal under 30 minutes",'
                     f'IF(M{row}>5,"VIOLATION - meal began after 5th hour",'

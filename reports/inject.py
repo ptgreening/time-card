@@ -33,7 +33,7 @@ def compliance(net, meals, deduct, mins, began):
     if net is None or net <= 5: return ''
     if meals == 0 and deduct == 0:
         if net <= 6: return ''
-        return 'VIOLATION - no meal taken, over 5 hrs'
+        return 'VIOLATION - no meal taken, over 6 hrs'
     if meals == 0 and deduct > 0: return 'REVIEW - lunch button, no times recorded'
     if mins is not None and mins < 30: return 'VIOLATION - meal under 30 minutes'
     if began is not None and began > 5: return 'VIOLATION - meal began after 5th hour'
