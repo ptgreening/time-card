@@ -63,7 +63,18 @@ note('Day assignment','A shift belongs to the day it STARTED. A shift running pa
      'day it began.')
 r+=1
 ws.cell(r,2,'FLAGS').font=Font(name=ARIAL,size=11,bold=True); r+=1
-note('MBP','Meal break penalty — more than 6.00 net hours worked with no meal recorded, by either method.')
+note('Meal break rules','California Labor Code 512 and the IWC Wage Orders. A meal period must be at '
+     'least 30 uninterrupted minutes, and must BEGIN before the end of the 5th hour of work.')
+note('  Over 5 hours','A meal period is required. If none was taken, that is a violation.')
+note('  5 to 6 hours','The meal may be waived by mutual consent. Shown as WAIVER REQUIRED — not a penalty, but you '
+     'need a signed waiver on file to rely on it.')
+note('  Over 10 hours','A second meal period is required. Between 10 and 12 hours it may be waived by mutual '
+     'consent, provided the first meal was actually taken.')
+note('  Over 12 hours','The second meal can no longer be waived. Missing it is a violation.')
+note('Penalty Hrs','One hour of pay at the regular rate per workday, under Labor Code 226.7. Capped at one hour '
+     'per day for meal violations no matter how many occur that day.')
+note('REVIEW rows','The lunch button records THAT a meal was taken but not WHEN or for HOW LONG, so compliance '
+     'cannot be verified from the data. See the note at the bottom of this page.')
 note('OT DAY','More than 8.00 net hours in a single day.')
 note('OVER 40','More than 40.00 net hours in a pay period, per employee.')
 note('HELD','Excluded from totals pending correction. See the Needs Review tab.')
@@ -75,6 +86,16 @@ note('A row showing 6.00 can still flag MBP','Hours are displayed to two places 
      'worked. Kevin Tran on 08/15 reads 6.00 because he worked 6 hours and 9 seconds. The flag is correct; the '
      'display is simply rounded. Erring toward flagging is deliberate — an extra look costs less than a missed penalty.',
      Font(name=ARIAL, size=10, italic=True))
+r+=1
+ws.cell(r,2,'GAP TO FIX').font=Font(name=ARIAL,size=11,bold=True,color='C00000'); r+=1
+note('The lunch button records no time','Roles that press the lunch button instead of clocking out record only '
+     'that a meal happened — no start time and no duration. California compliance turns on WHEN the meal began '
+     'and HOW LONG it lasted, so those days cannot be shown compliant from the records. They are marked REVIEW '
+     'rather than assumed good. Recording a timestamp when the button is pressed would close this.', RED)
+r+=1
+note('Rest breaks are not tracked','A 10-minute paid rest period is required per 4 hours worked, and carries its '
+     'own separate one-hour penalty. The time clock does not record rest breaks, so no rest violations appear '
+     'here. That does not mean there were none.', RED)
 ws.sheet_view.showGridLines=False
 
 # ── PAY PERIOD SHEETS ─────────────────────────────────────────
@@ -83,8 +104,10 @@ periods=defaultdict(list)
 for x in D: periods[pstart(x['date'])].append(x)
 
 COLS=['Employee','Date','Day','Clock In','Meal Out','Meal In','Clock Out',
-      'Gross Hrs','Meal Deduct','Net Hrs','MBP','OT DAY','Notes']
-W=[22,11,6,11,11,11,11,10,10,10,7,8,42]
+      'Gross Hrs','Meal Deduct','Net Hrs','Meals','Meal Mins','Meal Began\n(hrs into shift)',
+      'Meal Break Compliance (CA)','Penalty Hrs','OT DAY','Notes']
+W=[22,11,6,11,11,11,11,9,9,9,7,9,11,48,9,8,30]
+NCOL=17
 
 for ps in sorted(periods):
     pe=ps+dt.timedelta(days=6)
@@ -113,24 +136,40 @@ for ps in sorted(periods):
                     if v.date()!=x['date']:
                         c.number_format='mm/dd h:mm AM/PM'
             if held:
-                for col in range(1,14): ws.cell(row,col).fill=HOLD_F
+                for col in range(1,NCOL+1): ws.cell(row,col).fill=HOLD_F
                 ws.cell(row,8,'HELD').font=RED
-                ws.cell(row,13,x['why']).font=BASE
+                ws.cell(row,14,'Not assessed - shift needs correction').font=MUTED
+                ws.cell(row,NCOL,x['why']).font=BASE
             else:
                 g=f'=IF(E{row}="",(G{row}-D{row})*24,(E{row}-D{row})*24+(G{row}-F{row})*24)'
                 ws.cell(row,8,g).font=BASE
                 ws.cell(row,9,0.5 if x['button_lunch'] else 0).font=INPUT
                 ws.cell(row,10,f'=H{row}-I{row}').font=BOLD
-                # No meal recorded = no meal punch AND no button deduction.
-                ws.cell(row,11,f'=IF(AND(J{row}>6,E{row}="",I{row}=0),"MBP","")').font=RED
-                ws.cell(row,12,f'=IF(J{row}>8,"OT","")').font=RED
-                if x['note']: ws.cell(row,13,x['note']).font=MUTED
+                ws.cell(row,11,1 if x['meal_out'] else 0).font=INPUT
+                ws.cell(row,12,f'=IF(E{row}="","",(F{row}-E{row})*1440)').font=BASE
+                ws.cell(row,13,f'=IF(E{row}="","",(E{row}-D{row})*24)').font=BASE
+                # Labor Code 512: meal required over 5 hrs, must BEGIN before the end of
+                # the 5th hour, at least 30 uninterrupted minutes. 5-6 hrs may be waived;
+                # a 2nd meal is required over 10 and unwaivable over 12.
+                ws.cell(row,14,
+                    f'=IF(J{row}<=5,"",'
+                    f'IF(AND(K{row}=0,I{row}=0),IF(J{row}<=6,"WAIVER REQUIRED - no meal, 5-6 hr shift",'
+                    f'"VIOLATION - no meal taken, over 5 hrs"),'
+                    f'IF(AND(K{row}=0,I{row}>0),"REVIEW - lunch button, no times recorded",'
+                    f'IF(L{row}<30,"VIOLATION - meal under 30 minutes",'
+                    f'IF(M{row}>5,"VIOLATION - meal began after 5th hour",'
+                    f'IF(AND(J{row}>12,K{row}<2),"VIOLATION - no 2nd meal, over 12 hrs",'
+                    f'IF(AND(J{row}>10,K{row}<2),"WAIVER REQUIRED - no 2nd meal, 10-12 hrs","")))))))').font=BASE
+                ws.cell(row,15,f'=IF(LEFT(N{row},9)="VIOLATION",1,0)').font=RED
+                ws.cell(row,16,f'=IF(J{row}>8,"OT","")').font=RED
+                if x['note']: ws.cell(row,NCOL,x['note']).font=MUTED
                 netcells.append(f'J{row}')
-            for col in (8,9,10):
+            for col in (8,9,10,12,13,15):
                 ws.cell(row,col).number_format='0.00'
                 ws.cell(row,col).alignment=Alignment(horizontal='center')
-            for col in (3,11,12): ws.cell(row,col).alignment=Alignment(horizontal='center')
-            for col in range(1,14): ws.cell(row,col).border=BOX
+            for col in (3,11,16): ws.cell(row,col).alignment=Alignment(horizontal='center')
+            ws.cell(row,14).alignment=Alignment(horizontal='left')
+            for col in range(1,NCOL+1): ws.cell(row,col).border=BOX
             row+=1
         # employee total for the pay period
         rng=f'J{first}:J{row-1}'
@@ -142,11 +181,14 @@ for ps in sorted(periods):
         ws.cell(row,8).number_format='0.00'; ws.cell(row,8).alignment=Alignment(horizontal='center')
         ws.cell(row,9,f'=SUM(I{first}:I{row-1})').font=BASE
         ws.cell(row,9).number_format='0.00'; ws.cell(row,9).alignment=Alignment(horizontal='center')
-        ws.cell(row,11,f'=IF(J{row}>40,"OVER 40","")').font=RED
-        ws.cell(row,11).alignment=Alignment(horizontal='center')
+        ws.cell(row,15,f'=SUM(O{first}:O{row-1})').font=RED
+        ws.cell(row,15).number_format='0'; ws.cell(row,15).alignment=Alignment(horizontal='center')
+        ws.cell(row,14,'Meal penalty hours owed, this period ->').font=BOLD
+        ws.cell(row,16,f'=IF(J{row}>40,"OVER 40","")').font=RED
+        ws.cell(row,16).alignment=Alignment(horizontal='center')
         held_n=sum(1 for x in recs if x['review'])
-        if held_n: ws.cell(row,13,f'{held_n} day(s) held — total is incomplete').font=RED
-        for col in range(1,14):
+        if held_n: ws.cell(row,NCOL,f'{held_n} day(s) held - total is incomplete').font=RED
+        for col in range(1,NCOL+1):
             ws.cell(row,col).fill=TOT_F; ws.cell(row,col).border=BOX
         row+=2
     ws.sheet_view.showGridLines=False
