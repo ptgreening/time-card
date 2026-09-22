@@ -100,18 +100,31 @@
     </div>
     <button id="staff-login-btn" onclick="goAccess()" style="background:none;border:1px solid #C7C7CC;border-radius:8px;padding:5px 12px;font-size:13px;color:#6C6C70;cursor:pointer;font-family:inherit">Staff login</button>
   </div>
-  <div style="padding:20px 16px 8px">
-    <p style="font-size:16px;font-weight:500;margin-bottom:4px">Welcome</p>
-    <p style="font-size:14px;color:#6C6C70;margin-bottom:14px">Type your name to clock in or out</p>
-    <input id="search" placeholder="Your name…" oninput="renderSearch()" autocomplete="off" style="border-radius:12px;font-size:16px;padding:14px 16px;margin-top:0" />
+  <div id="home-search">
+    <div style="padding:20px 16px 8px">
+      <p style="font-size:16px;font-weight:500;margin-bottom:4px">Welcome</p>
+      <p style="font-size:14px;color:#6C6C70;margin-bottom:14px">Type your name to clock in or out</p>
+      <input id="search" placeholder="Your name…" oninput="renderSearch()" autocomplete="off" style="border-radius:12px;font-size:16px;padding:14px 16px;margin-top:0" />
+    </div>
+    <div class="body" style="padding-top:8px"><div id="search-results"></div></div>
   </div>
-  <div class="body" style="padding-top:8px"><div id="search-results"></div></div>
+  <div class="body" id="home-mine" style="display:none"></div>
+</div>
+
+<!-- MISSED PUNCH -->
+<div id="missed" class="screen">
+  <div class="hdr">
+    <button class="back" onclick="closeMissed()"><i class="ti ti-arrow-left"></i> Back</button>
+    <span style="font-weight:500;font-size:17px">Missed punch</span>
+    <span style="width:60px"></span>
+  </div>
+  <div class="body" id="missed-body"></div>
 </div>
 
 <!-- EMPLOYEE CODE -->
 <div id="emp-code" class="screen">
   <div class="hdr">
-    <button class="back" onclick="goHome()"><i class="ti ti-arrow-left"></i> Back</button>
+    <button class="back" onclick="S.afterCode=null;goHome()"><i class="ti ti-arrow-left"></i> Back</button>
     <span id="ec-name" style="font-weight:500;font-size:17px"></span>
     <span style="width:60px"></span>
   </div>
@@ -185,6 +198,7 @@ const S = {
   tab:'status', viewDate:'', wkOff:0,
   pinBuf:'', pinErr:false, switchMode:false,
   empCodeBuf:'', empCodeErr:false, codeOk:false,
+  codeOkUntil:0, afterCode:null, requests:[],
   editEmp:null, editRole:null,
   showFlagSearch:false, resetTimer:null, resetInterval:null
 };
@@ -225,6 +239,11 @@ function genId(){ return Date.now().toString(36)+Math.random().toString(36).slic
 function getActive(eid){ return S.punches.find(p=>p.eid===eid&&!p.out)||null; }
 function weekStart(off){ const d=new Date(); d.setDate(d.getDate()-d.getDay()+(off*7)); d.setHours(0,0,0,0); return d; }
 function getFlag(eid,date){ return S.flags[`${eid}_${date}`]||{}; }
+// Hours worked so far today, counting the shift still running. Used only on the
+// employee's own live panel; pay totals stay on completed punches.
+function netSoFarMs(eid,date){
+  return Math.max(0, grossMs(eid,date) - (getFlag(eid,date).lunch ? 30*60*1000 : 0));
+}
 function netMs(eid,date){
   const ms = S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.in)===date).reduce((s,p)=>s+(new Date(p.out)-new Date(p.in)),0);
   return Math.max(0, ms-(getFlag(eid,date).lunch ? 30*60*1000 : 0));
@@ -247,13 +266,17 @@ function hasLunchGap(eid,date){
   }
   return false;
 }
-// Time on the clock for a date, counting a shift that is still running up to now
-// so the 6-hour break alert fires during the shift rather than after it ends.
+// Time on the clock for a date, counting a shift that is still running so the
+// 6-hour break alert fires during the shift rather than after it ends. A running
+// shift is followed past midnight — it belongs to the day it started — but an
+// abandoned punch is capped so a forgotten clock-out cannot run up an unbounded
+// total.
+const MAX_SHIFT_MS = 16*3600*1000;
 function grossMs(eid,date){
-  const dayEnd=new Date(date+'T23:59:59').getTime();
   return S.punches.filter(p=>p.eid===eid&&dateKey(p.in)===date).reduce((s,p)=>{
-    const end=p.out?new Date(p.out).getTime():Math.min(Date.now(),dayEnd);
-    return s+Math.max(0,end-new Date(p.in).getTime());
+    const start=new Date(p.in).getTime();
+    const end=p.out ? new Date(p.out).getTime() : Math.min(Date.now(), start+MAX_SHIFT_MS);
+    return s+Math.max(0,end-start);
   },0);
 }
 function hadNonLunchRole(eid,date){ return S.punches.some(p=>p.eid===eid&&dateKey(p.in)===date&&lunchMode(p.role)==='clockout'); }
@@ -292,11 +315,12 @@ function showToast(msg, ms=2500){
 
 // ── DATABASE ─────────────────────────────────────────────────
 async function loadAll(){
-  const [eR,pR,fR,cR] = await Promise.all([
+  const [eR,pR,fR,cR,rR] = await Promise.all([
     db.from('tc_employees').select('*').order('name'),
     db.from('tc_punches').select('*').order('clock_in'),
     db.from('tc_day_flags').select('*'),
-    db.from('tc_config').select('*').eq('id',1).single()
+    db.from('tc_config').select('*').eq('id',1).single(),
+    db.from('tc_punch_requests').select('*').order('created_at',{ascending:false})
   ]);
   if(eR.data) S.roster = eR.data.map(e=>({id:e.id,name:e.name,code:e.code||'',roles:e.roles||[],locations:e.locations||[]}));
   if(pR.data) S.punches = pR.data.map(normPunch);
@@ -304,6 +328,7 @@ async function loadAll(){
   if(cR.data) S.config={roles:cR.data.roles,locations:cR.data.locations,managerPin:cR.data.manager_pin,adminPin:cR.data.admin_pin,lunchRoles:cR.data.lunch_roles||[],lunchClockoutRoles:cR.data.lunch_clockout_roles||[]};
   // Carry the real reason up instead of a generic failure — "check your internet"
   // sends people looking in the wrong place when the database is the problem.
+  if(rR.data) S.requests=rR.data;
   const err=eR.error||pR.error||fR.error;
   if(err){ const e=new Error(err.message||'Load failed'); e.detail=err; throw e; }
 }
@@ -391,6 +416,16 @@ function setupRealtime(){
       else if(payload.eventType==='DELETE') S.punches=S.punches.filter(p=>p.id!==payload.old.id);
       const sc=document.querySelector('.screen.on');
       if(sc?.id==='dashboard'&&(S.tab==='daily'||S.tab==='status')) renderDash();
+      else if(sc?.id==='home') renderHome();
+    })
+    .on('postgres_changes',{event:'*',schema:'public',table:'tc_punch_requests'},payload=>{
+      const r=payload.new;
+      if(payload.eventType==='INSERT'&&!S.requests.find(x=>x.id===r.id)) S.requests.unshift(r);
+      else if(payload.eventType==='UPDATE') S.requests=S.requests.map(x=>x.id===r.id?r:x);
+      else if(payload.eventType==='DELETE') S.requests=S.requests.filter(x=>x.id!==payload.old.id);
+      const sc=document.querySelector('.screen.on');
+      if(sc?.id==='dashboard'){ renderDashTabs(); if(S.tab==='requests') renderDash(); }
+      else if(sc?.id==='home') renderHome();
     })
     .subscribe();
 }
@@ -402,6 +437,7 @@ function goHome(){
   clearReset(); show('home'); renderHdr();
   const s=document.getElementById('search'); if(s)s.value='';
   document.getElementById('search-results').innerHTML='';
+  renderHome();
 }
 function cancelAndGoHome(){ clearReset(); goHome(); }
 function goAccess(){ S.pinBuf=''; S.pinErr=false; buildPin(); show('access'); }
@@ -411,6 +447,65 @@ function renderHdr(){
 }
 
 // ── HOME ────────────────────────────────────────────────────
+// On a phone that remembers who you are, the home screen IS your day: a live
+// read-only summary, with every action behind the code gate.
+function renderHome(){
+  const mine=document.getElementById('home-mine'), srch=document.getElementById('home-search');
+  const emp=S.isPersonalDevice ? S.roster.find(e=>e.id===localStorage.getItem('tc_empId')) : null;
+  if(!emp){ mine.style.display='none'; srch.style.display=''; return; }
+  S.selId=emp.id;
+  srch.style.display='none'; mine.style.display='';
+  mine.innerHTML=buildMyDay(emp);
+}
+
+function buildMyDay(emp){
+  const act=getActive(emp.id);
+  const today=act?dateKey(act.in):todayKey();   // the shift's day, not the clock's
+  const fl=getFlag(emp.id,today);
+  const chk=canClockIn(emp.id);
+  const tookLunch=fl.lunch||hasLunchGap(emp.id,today);
+  const mode=act?lunchMode(act.role):'none';
+  const pending=S.requests.filter(r=>r.employee_id===emp.id&&r.status==='pending').length;
+
+  const line=(k,v,c='')=>`<div style="display:flex;justify-content:space-between;gap:12px;font-size:15px;margin-bottom:7px"><span style="color:#6C6C70">${k}</span><span style="font-weight:500;text-align:right;${c}">${v}</span></div>`;
+
+  let head, rows='';
+  if(act){
+    head=`<div class="ml" style="color:#3B6D11;margin-bottom:6px">Clocked in</div>
+      <div style="font-size:22px;font-weight:500">${act.role}</div>
+      <div style="font-size:13px;color:#6C6C70;margin-bottom:16px">${act.loc}</div>
+      <div style="display:flex;gap:28px;margin-bottom:18px">
+        <div><div class="ml">In at</div><div style="font-size:17px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div>
+        <div><div class="ml">On the clock</div><div id="el-val" style="font-size:17px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div>
+      </div>`;
+  } else {
+    head=`<div class="ml" style="margin-bottom:6px">Not clocked in</div>
+      <div style="font-size:20px;font-weight:500;margin-bottom:16px">${fmtToday()}</div>`;
+  }
+  rows+=line('Lunch', tookLunch?'Taken':'Not taken', tookLunch?'':'color:#BA7517');
+  rows+=line(today===todayKey()?'Hours today':'Hours this shift',
+             `${hoursD(netSoFarMs(emp.id,today))} hrs`);
+  if(!act) rows+=line('Can clock in', chk.ok?'Now':chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true}), chk.ok?'':'color:#BA7517');
+  if(pending) rows+=line('Missed punch reports', `${pending} awaiting review`, 'color:#BA7517');
+
+  const acts=[];
+  if(act){
+    if(!tookLunch&&mode==='button') acts.push(['btn-amber','ti-tools-kitchen-2','Take lunch (30 min)',`requireCode(()=>takeLunch())`]);
+    if(!tookLunch&&mode==='clockout') acts.push(['btn-amber','ti-tools-kitchen-2','Start lunch (clock out 30 min)',`requireCode(()=>doClockOut('${act.id}',true))`]);
+    acts.push(['btn-ghost','ti-refresh','Switch role / location',`requireCode(()=>{S.switchMode=true;showEmpScreen()})`]);
+    acts.push(['btn-red','ti-logout','Clock out'+(acts.length?' — done for the day':''),`requireCode(()=>doClockOut('${act.id}'))`]);
+  } else {
+    acts.push([chk.ok?'btn-green':'btn-ghost','ti-login','Clock in',`requireCode(()=>showEmpScreen())`]);
+  }
+  acts.push(['btn-ghost','ti-alert-circle','Report a missed punch',`requireCode(()=>openMissed())`]);
+
+  return `<div class="active-card" style="${act?'':'border-color:#E5E5EA'}">${head}${rows}</div>
+    ${acts.map(([c,i,t,fn])=>`<button class="btn ${c}" onclick="${fn}"><i class="ti ${i}"></i> ${t}</button>`).join('')}
+    <div style="text-align:center;margin-top:18px">
+      <button onclick="forgetDevice()" style="background:none;border:none;font-size:12px;color:#8E8E93;cursor:pointer;text-decoration:underline">Not ${emp.name}? Switch user</button>
+    </div>`;
+}
+
 function renderSearch(){
   const q=(document.getElementById('search')||{}).value||'';
   const el=document.getElementById('search-results'); if(!el)return;
@@ -420,16 +515,37 @@ function renderSearch(){
   el.innerHTML=`<div style="border-radius:12px;overflow:hidden;border:1px solid #E5E5EA">${f.map(e=>`<button class="emp-row" onclick="openEmp('${e.id}')"><i class="ti ti-user" style="font-size:16px;color:#C7C7CC;margin-right:12px"></i>${e.name}<i class="ti ti-chevron-right" style="font-size:14px;color:#C7C7CC;margin-left:auto"></i></button>`).join('')}</div>`;
 }
 
-// ── EMPLOYEE CODE ────────────────────────────────────────────
-function openEmp(eid){
-  const emp=S.roster.find(e=>e.id===eid); if(!emp)return;
-  S.selId=eid; S.switchMode=false; S.codeOk=false;
-  if(!emp.code){ S.codeOk=true; showEmpScreen(); return; }
+// ── CODE GATE ────────────────────────────────────────────────
+// Viewing your own day is free on your own phone; every action that writes
+// something costs a code. The code then stays good for two minutes so doing two
+// things in a row does not mean typing it twice.
+const CODE_GRACE_MS = 2*60*1000;
+function codeStillValid(){ return Date.now() < S.codeOkUntil; }
+function grantCode(){ S.codeOkUntil = Date.now() + CODE_GRACE_MS; }
+function dropCode(){ S.codeOkUntil = 0; }
+
+// Run fn now if the code is not needed or still good, otherwise ask for it first.
+function requireCode(fn){
+  const emp=S.roster.find(e=>e.id===S.selId);
+  if(!emp) return;
+  if(!emp.code || codeStillValid()){ fn(); return; }
+  S.afterCode=fn; openCodeEntry(emp);
+}
+function openCodeEntry(emp){
   S.empCodeBuf=''; S.empCodeErr=false;
   document.getElementById('ec-name').textContent=emp.name;
   document.getElementById('ec-msg').textContent=`Enter your ${emp.code.length}-digit code`;
   buildEmpCode(); show('emp-code');
 }
+
+// ── EMPLOYEE CODE ────────────────────────────────────────────
+function openEmp(eid){
+  const emp=S.roster.find(e=>e.id===eid); if(!emp)return;
+  S.selId=eid; S.switchMode=false;
+  if(!emp.code||codeStillValid()){ showEmpScreen(); return; }
+  S.afterCode=showEmpScreen; openCodeEntry(emp);
+}
+
 function buildEmpCode(){
   const dots=document.getElementById('ec-dots'),pad=document.getElementById('ec-pad'); if(!dots||!pad)return;
   const len=(S.roster.find(e=>e.id===S.selId)?.code||'').length||CODE_MAX;
@@ -441,7 +557,11 @@ function ecDigit(d){
   if(S.empCodeBuf.length>=emp.code.length)return;
   S.empCodeBuf+=d; buildEmpCode();
   if(S.empCodeBuf.length<emp.code.length)return;
-  if(S.empCodeBuf===emp.code){ S.codeOk=true; setTimeout(showEmpScreen,100); return; }
+  if(S.empCodeBuf===emp.code){
+    grantCode();
+    const next=S.afterCode||showEmpScreen; S.afterCode=null;
+    setTimeout(next,100); return;
+  }
   S.empCodeErr=true; buildEmpCode();
   document.getElementById('ec-msg').textContent='Incorrect code — try again';
   setTimeout(()=>{S.empCodeBuf='';S.empCodeErr=false;buildEmpCode()},700);
@@ -459,8 +579,7 @@ function showEmpScreen(){
 // only after someone clocks out FOR LUNCH. Ending a shift — or clocking out after
 // already taking lunch — never blocks a later clock-in.
 function canClockIn(eid){
-  const today=todayKey();
-  const outs=S.punches.filter(p=>p.eid===eid&&p.out&&dateKey(p.out)===today).sort((a,b)=>new Date(b.out)-new Date(a.out));
+  const outs=S.punches.filter(p=>p.eid===eid&&p.out).sort((a,b)=>new Date(b.out)-new Date(a.out));
   if(!outs.length||!outs[0].lunchOut)return{ok:true};
   const diff=Date.now()-new Date(outs[0].out).getTime();
   if(diff<30*60*1000){const wu=new Date(new Date(outs[0].out).getTime()+30*60*1000);return{ok:false,wu}}
@@ -509,7 +628,9 @@ function renderEmpBody(){
 }
 
 function buildMyStatus(eid){
-  const today=todayKey(), act=getActive(eid), fl=getFlag(eid,today);
+  const act=getActive(eid);
+  const today=act?dateKey(act.in):todayKey();
+  const fl=getFlag(eid,today);
   const eps=S.punches.filter(p=>p.eid===eid&&dateKey(p.in)===today).sort((a,b)=>new Date(a.in)-new Date(b.in));
   if(!eps.length&&!fl.lunch) return `<div class="card" style="margin-top:4px"><div class="ml" style="margin-bottom:8px">Today's status</div><div style="font-size:14px;color:#6C6C70">No activity yet today.</div></div>`;
   const chk=canClockIn(eid);
@@ -518,7 +639,7 @@ function buildMyStatus(eid){
   if(act) rows.push(['Current shift', `${act.role} · ${act.loc}`]);
   else if(eps.length){ const last=eps[eps.length-1]; if(last.out) rows.push(['Last clock out', fmtTime(last.out)]); }
   rows.push(['Lunch', fl.lunch?'Taken (30 min deducted)':(hasLunchGap(eid,today)?'Taken (clocked out)':'Not taken')]);
-  rows.push(['Hours today', `${hoursD(netMs(eid,today))} hrs`]);
+  rows.push(['Hours today', `${hoursD(netSoFarMs(eid,today))} hrs`]);
   if(!act&&!chk.ok) rows.push(['Can clock back in', chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})]);
   else if(!act) rows.push(['Can clock back in','Now']);
   return `<div class="card" style="margin-top:4px"><div class="ml" style="margin-bottom:10px">Today's status</div>${rows.map(([k,v])=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:5px;gap:12px"><span style="color:#6C6C70">${k}</span><span style="font-weight:500;text-align:right">${v}</span></div>`).join('')}</div>`;
@@ -583,10 +704,79 @@ function rememberMe(){
 }
 
 function forgetDevice(){
-  localStorage.removeItem('tc_empId'); S.isPersonalDevice=false; S.selId=null; goHome();
+  localStorage.removeItem('tc_empId'); S.isPersonalDevice=false; S.selId=null;
+  dropCode(); goHome();
 }
 
 function finishAndGoHome(msg){ clearReset(); goHome(); if(msg) showToast(msg,3000); }
+
+// ── MISSED PUNCH ─────────────────────────────────────────────
+function openMissed(){ renderMissed(); show('missed'); }
+function closeMissed(){ goHome(); }
+
+function renderMissed(){
+  const emp=S.roster.find(e=>e.id===S.selId); if(!emp){goHome();return}
+  const body=document.getElementById('missed-body'); if(!body)return;
+  const today=todayKey();
+  const min=(()=>{const d=new Date(); d.setDate(d.getDate()-14); return dateKey(d.toISOString())})();
+  const mine=S.requests.filter(r=>r.employee_id===emp.id&&r.status==='pending')
+    .sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  body.innerHTML=`
+    <div class="card">
+      <div style="font-size:14px;color:#6C6C70;margin-bottom:2px">Tell a manager about a punch you missed. This does not change your
+      time — a manager reviews it and makes the correction.</div>
+      <label>Date of the missed punch</label>
+      <input type="date" id="mp-date" value="${today}" min="${min}" max="${today}" />
+      <label>Which punch was missed</label>
+      <select id="mp-type">
+        <option value="in">Clock in</option>
+        <option value="lunch">Lunch</option>
+        <option value="out">Clock out</option>
+      </select>
+      <label>What time should it have been</label>
+      <input type="time" id="mp-time" />
+      <label>What happened <span style="color:#8E8E93">(optional)</span></label>
+      <textarea id="mp-note" rows="3" placeholder="Phone died, forgot on the way out…"></textarea>
+    </div>
+    <button class="btn btn-green" id="mp-send" onclick="submitMissed()">Submit report</button>
+    <button class="btn btn-ghost" onclick="closeMissed()">Cancel</button>
+    ${mine.length?`<div class="card" style="margin-top:14px"><div class="ml" style="margin-bottom:8px">Awaiting review</div>${mine.map(r=>`<div style="display:flex;justify-content:space-between;font-size:14px;margin-bottom:5px;gap:10px"><span>${fmtDateDisp(r.punch_date)}</span><span style="color:#6C6C70">${TYPE_LABEL[r.punch_type]} · ${fmtClock(r.punch_time)}</span></div>`).join('')}</div>`:''}`;
+}
+
+const TYPE_LABEL={in:'Clock in',lunch:'Lunch',out:'Clock out'};
+function fmtClock(t){
+  if(!t) return '';
+  const [h,m]=t.split(':').map(Number);
+  const ap=h>=12?'PM':'AM', hh=((h+11)%12)+1;
+  return `${hh}:${p2(m)} ${ap}`;
+}
+
+async function submitMissed(){
+  if(!requireOnline())return;
+  const emp=S.roster.find(e=>e.id===S.selId); if(!emp)return;
+  const date=document.getElementById('mp-date').value;
+  const type=document.getElementById('mp-type').value;
+  const time=document.getElementById('mp-time').value;
+  const note=(document.getElementById('mp-note').value||'').trim().slice(0,500);
+  if(!date){showToast('⚠️ Pick the date');return}
+  if(!time){showToast('⚠️ Pick the time it should have been');return}
+  if(date>todayKey()){showToast('⚠️ That date is in the future');return}
+  const btn=document.getElementById('mp-send'); if(btn){btn.disabled=true;btn.textContent='Sending…'}
+  const row={id:genId(),employee_id:emp.id,employee_name:emp.name,
+             punch_date:date,punch_type:type,punch_time:time,note:note||null};
+  const {error}=await db.from('tc_punch_requests').insert(row);
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Submit report'}
+    // The unique index refuses a second open report for the same day and type.
+    showToast(error.code==='23505'
+      ? '⚠️ You already reported that punch — a manager has it'
+      : '⚠️ Could not send — try again');
+    return;
+  }
+  S.requests.push({...row,status:'pending',created_at:new Date().toISOString()});
+  showToast('Report sent to a manager ✓',3000);
+  goHome();
+}
 
 // ── PIN ──────────────────────────────────────────────────────
 function buildPin(){
@@ -610,11 +800,59 @@ function openDash(){
   renderDashTabs(); renderDash(); show('dashboard');
 }
 function renderDashTabs(){
-  const tabs=[['status','Status'],['daily','Daily'],['weekly','Weekly']]; if(S.isAdmin)tabs.push(['settings','Settings']);
+  const n=S.requests.filter(r=>r.status==='pending').length;
+  const tabs=[['status','Status'],['daily','Daily'],['weekly','Weekly'],
+              ['requests', n?`Requests (${n})`:'Requests']];
+  if(S.isAdmin)tabs.push(['settings','Settings']);
   document.getElementById('dash-tabs').innerHTML=tabs.map(([id,lbl])=>`<button class="tab${S.tab===id?' on':''}" onclick="setTab('${id}')">${lbl}</button>`).join('');
 }
 function setTab(t){ S.tab=t; S.showFlagSearch=false; S.editEmp=null; S.editRole=null; renderDashTabs(); renderDash(); }
-function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; if(S.tab==='status')b.innerHTML=buildStatus(); else if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else b.innerHTML=buildSettings(); }
+function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; if(S.tab==='status')b.innerHTML=buildStatus(); else if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else if(S.tab==='requests')b.innerHTML=buildRequests(); else b.innerHTML=buildSettings(); }
+
+// ── REQUESTS ─────────────────────────────────────────────────
+// Deliberately read-only: a missed punch is a claim about something the clock
+// did not see, so an admin edits the day themselves rather than one tap turning
+// a claim into a record.
+function buildRequests(){
+  const pend=S.requests.filter(r=>r.status==='pending')
+    .sort((a,b)=>a.punch_date.localeCompare(b.punch_date)||a.employee_name.localeCompare(b.employee_name));
+  const done=S.requests.filter(r=>r.status!=='pending')
+    .sort((a,b)=>(b.resolved_at||'').localeCompare(a.resolved_at||'')).slice(0,15);
+  const card=r=>`<div class="tc">
+      <div class="th"><span>${r.employee_name}</span>
+        <span style="font-size:12px;font-weight:400;color:#6C6C70">${fmtDateDisp(r.punch_date)}</span></div>
+      <div class="pr">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px">
+          <span style="font-size:15px;font-weight:500">${TYPE_LABEL[r.punch_type]}</span>
+          <span style="font-size:15px">should have been <strong>${fmtClock(r.punch_time)}</strong></span>
+        </div>
+        ${r.note?`<div style="font-size:13px;color:#6C6C70;margin-top:8px;font-style:italic">“${esc(r.note)}”</div>`:''}
+        <div style="font-size:11px;color:#8E8E93;margin-top:8px">Reported ${fmtDateDisp(dateKey(r.created_at))} at ${fmtTime(r.created_at)}</div>
+      </div>
+      <div class="cr" style="gap:10px">
+        <button class="del" style="color:#007AFF" onclick="jumpToDay('${r.punch_date}')">Open that day →</button>
+        <button class="del" style="color:#3B6D11;margin-left:auto" onclick="resolveRequest('${r.id}','handled')">Mark fixed</button>
+        <button class="del" onclick="resolveRequest('${r.id}','dismissed')">Dismiss</button>
+      </div>
+    </div>`;
+  return `${pend.length
+      ? `<div style="font-weight:500;font-size:15px;margin-bottom:10px">${pend.length} awaiting review</div>${pend.map(card).join('')}`
+      : `<div style="text-align:center;color:#6C6C70;margin-top:40px;font-size:14px">No missed punch reports</div>`}
+    ${done.length?`<div style="font-weight:500;font-size:14px;margin:22px 0 8px;color:#6C6C70">Recently closed</div>${done.map(r=>`<div class="pr" style="background:#fff;border-radius:10px;border:1px solid #E5E5EA;margin-bottom:6px;display:flex;justify-content:space-between;gap:10px"><span style="font-size:14px">${r.employee_name} · ${fmtDateDisp(r.punch_date)}</span><span class="chip ${r.status==='handled'?'chip-green':'chip-amber'}">${r.status==='handled'?'Fixed':'Dismissed'}</span></div>`).join('')}`:''}`;
+}
+
+function jumpToDay(date){ S.viewDate=date; setTab('daily'); }
+
+async function resolveRequest(id,status){
+  if(!requireOnline())return;
+  const now=new Date().toISOString();
+  const {error}=await db.from('tc_punch_requests')
+    .update({status,resolved_at:now,resolved_by:S.isAdmin?'Admin':'Manager'}).eq('id',id);
+  if(error){showToast('⚠️ Could not save');return}
+  S.requests=S.requests.map(r=>r.id===id?{...r,status,resolved_at:now}:r);
+  showToast(status==='handled'?'Marked fixed ✓':'Dismissed');
+  renderDashTabs(); renderDash();
+}
 
 // ── QUICK STATUS (live) ──────────────────────────────────────
 function buildStatus(){
@@ -974,8 +1212,8 @@ async function init(){
     await loadAll();
     setupRealtime();
     const savedId=localStorage.getItem('tc_empId');
-    if(savedId&&S.roster.find(e=>e.id===savedId)){S.selId=savedId;S.isPersonalDevice=true;openEmp(savedId);}
-    else{goHome();}
+    if(savedId&&S.roster.find(e=>e.id===savedId)){S.selId=savedId;S.isPersonalDevice=true;}
+    goHome();
   } catch(err){
     const [title,msg]=explainDbError(err);
     document.getElementById('error-title').textContent=title;
@@ -992,6 +1230,7 @@ setInterval(()=>{
   const e=document.getElementById('el-val'); if(e){const a=getActive(S.selId);if(a)e.textContent=elapsed(a.in)}
   const sc=document.querySelector('.screen.on');
   if(sc?.id==='dashboard'&&S.tab==='status') renderDash();
+  else if(sc?.id==='home'&&S.isPersonalDevice) renderHome();
 },30000);
 
 // Lets the app be installed to a home screen. The worker serves the page from
