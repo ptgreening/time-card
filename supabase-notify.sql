@@ -68,5 +68,9 @@ create trigger tr_notify_punch_request
   after insert on tc_punch_requests
   for each row execute function notify_punch_request();
 
+-- ── General notes ────────────────────────────────────────────
+-- Same pattern, different subject. See the notify_note() function and the
+-- tr_notify_note trigger on tc_notes in the live project.
+
 -- Check delivery after a report:
 --   select status_code, content, created from net._http_response order by created desc limit 5;

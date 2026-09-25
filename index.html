@@ -36,8 +36,9 @@
     .btn-green { background: #3B6D11; color: #EAF3DE; }
     .btn-red { background: #A32D2D; color: #FCEBEB; }
     .btn-ghost { background: transparent; border: 1px solid #C7C7CC; color: #000; }
-    .tab-bar { background: #fff; border-bottom: 1px solid #E5E5EA; display: flex; }
-    .tab { flex: 1; padding: 10px 0; background: none; border: none; border-bottom: 2px solid transparent; font-size: 14px; cursor: pointer; color: #6C6C70; font-family: inherit; }
+    .tab-bar { background: #fff; border-bottom: 1px solid #E5E5EA; display: flex; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .tab-bar::-webkit-scrollbar { display: none; }
+    .tab { flex: 1 0 auto; min-width: 76px; padding: 10px 8px; white-space: nowrap; background: none; border: none; border-bottom: 2px solid transparent; font-size: 14px; cursor: pointer; color: #6C6C70; font-family: inherit; }
     .tab.on { border-bottom-color: #EF9F27; color: #BA7517; font-weight: 500; }
     .body { flex: 1; padding: 16px; overflow-y: auto; }
     .emp-row { display: flex; align-items: center; padding: 15px 16px; background: #fff; border: none; border-bottom: 1px solid #E5E5EA; cursor: pointer; width: 100%; text-align: left; font-family: inherit; font-size: 15px; color: #000; }
@@ -109,6 +110,16 @@
     <div class="body" style="padding-top:8px"><div id="search-results"></div></div>
   </div>
   <div class="body" id="home-mine" style="display:none"></div>
+</div>
+
+<!-- NOTE -->
+<div id="note" class="screen">
+  <div class="hdr">
+    <button class="back" onclick="goHome()"><i class="ti ti-arrow-left"></i> Back</button>
+    <span style="font-weight:500;font-size:17px">Send a note</span>
+    <span style="width:60px"></span>
+  </div>
+  <div class="body" id="note-body"></div>
 </div>
 
 <!-- MISSED PUNCH -->
@@ -198,7 +209,7 @@ const S = {
   tab:'status', viewDate:'', wkOff:0,
   pinBuf:'', pinErr:false, switchMode:false,
   empCodeBuf:'', empCodeErr:false, codeOk:false,
-  codeOkUntil:0, afterCode:null, requests:[],
+  codeOkUntil:0, afterCode:null, requests:[], notes:[],
   editEmp:null, editRole:null,
   showFlagSearch:false, resetTimer:null, resetInterval:null
 };
@@ -239,8 +250,25 @@ function genId(){ return Date.now().toString(36)+Math.random().toString(36).slic
 function getActive(eid){ return S.punches.find(p=>p.eid===eid&&!p.out)||null; }
 function weekStart(off){ const d=new Date(); d.setDate(d.getDate()-d.getDay()+(off*7)); d.setHours(0,0,0,0); return d; }
 function getFlag(eid,date){ return S.flags[`${eid}_${date}`]||{}; }
-// Hours worked so far today, counting the shift still running. Used only on the
-// employee's own live panel; pay totals stay on completed punches.
+// A shift belongs to the day it STARTED, and a role switch does not start a new
+// shift — it closes one punch and opens the next in the same instant. So the work
+// day is the date of the FIRST punch in the current unbroken chain, walking back
+// through lunches and role switches. Without this, switching roles at 12:30am
+// moved the work day forward and offered a second 30-minute lunch deduction.
+const SHIFT_GAP_MS = 4*3600*1000;
+function workDayKey(eid){
+  const ps=S.punches.filter(p=>p.eid===eid).sort((a,b)=>new Date(a.in)-new Date(b.in));
+  if(!ps.length) return todayKey();
+  let i=ps.findIndex(p=>!p.out);
+  if(i<0){
+    i=ps.length-1;
+    // Nobody on the clock and the last shift ended long ago: this is just today.
+    if(Date.now()-new Date(ps[i].out).getTime() >= SHIFT_GAP_MS) return todayKey();
+  }
+  while(i>0 && ps[i-1].out && (new Date(ps[i].in)-new Date(ps[i-1].out)) < SHIFT_GAP_MS) i--;
+  return dateKey(ps[i].in);
+}
+
 function netSoFarMs(eid,date){
   return Math.max(0, grossMs(eid,date) - (getFlag(eid,date).lunch ? 30*60*1000 : 0));
 }
@@ -315,12 +343,13 @@ function showToast(msg, ms=2500){
 
 // ── DATABASE ─────────────────────────────────────────────────
 async function loadAll(){
-  const [eR,pR,fR,cR,rR] = await Promise.all([
+  const [eR,pR,fR,cR,rR,nR] = await Promise.all([
     db.from('tc_employees').select('*').order('name'),
     db.from('tc_punches').select('*').order('clock_in'),
     db.from('tc_day_flags').select('*'),
     db.from('tc_config').select('*').eq('id',1).single(),
-    db.from('tc_punch_requests').select('*').order('created_at',{ascending:false})
+    db.from('tc_punch_requests').select('*').order('created_at',{ascending:false}),
+    db.from('tc_notes').select('*').order('created_at',{ascending:false})
   ]);
   if(eR.data) S.roster = eR.data.map(e=>({id:e.id,name:e.name,code:e.code||'',roles:e.roles||[],locations:e.locations||[]}));
   if(pR.data) S.punches = pR.data.map(normPunch);
@@ -329,6 +358,7 @@ async function loadAll(){
   // Carry the real reason up instead of a generic failure — "check your internet"
   // sends people looking in the wrong place when the database is the problem.
   if(rR.data) S.requests=rR.data;
+  if(nR.data) S.notes=nR.data;
   const err=eR.error||pR.error||fR.error;
   if(err){ const e=new Error(err.message||'Load failed'); e.detail=err; throw e; }
 }
@@ -418,6 +448,14 @@ function setupRealtime(){
       if(sc?.id==='dashboard'&&(S.tab==='daily'||S.tab==='status')) renderDash();
       else if(sc?.id==='home') renderHome();
     })
+    .on('postgres_changes',{event:'*',schema:'public',table:'tc_notes'},payload=>{
+      const n=payload.new;
+      if(payload.eventType==='INSERT'&&!S.notes.find(x=>x.id===n.id)) S.notes.unshift(n);
+      else if(payload.eventType==='UPDATE') S.notes=S.notes.map(x=>x.id===n.id?n:x);
+      else if(payload.eventType==='DELETE') S.notes=S.notes.filter(x=>x.id!==payload.old.id);
+      const sc=document.querySelector('.screen.on');
+      if(sc?.id==='dashboard'){ renderDashTabs(); if(S.tab==='notes') renderDash(); }
+    })
     .on('postgres_changes',{event:'*',schema:'public',table:'tc_punch_requests'},payload=>{
       const r=payload.new;
       if(payload.eventType==='INSERT'&&!S.requests.find(x=>x.id===r.id)) S.requests.unshift(r);
@@ -460,7 +498,7 @@ function renderHome(){
 
 function buildMyDay(emp){
   const act=getActive(emp.id);
-  const today=act?dateKey(act.in):todayKey();   // the shift's day, not the clock's
+  const today=workDayKey(emp.id);
   const fl=getFlag(emp.id,today);
   const chk=canClockIn(emp.id);
   const tookLunch=fl.lunch||hasLunchGap(emp.id,today);
@@ -498,6 +536,7 @@ function buildMyDay(emp){
     acts.push([chk.ok?'btn-green':'btn-ghost','ti-login','Clock in',`requireCode(()=>showEmpScreen())`]);
   }
   acts.push(['btn-ghost','ti-alert-circle','Report a missed punch',`requireCode(()=>openMissed())`]);
+  acts.push(['btn-ghost','ti-message-2','Send a note to a manager',`requireCode(()=>openNote())`]);
 
   return `<div class="active-card" style="${act?'':'border-color:#E5E5EA'}">${head}${rows}</div>
     ${acts.map(([c,i,t,fn])=>`<button class="btn ${c}" onclick="${fn}"><i class="ti ${i}"></i> ${t}</button>`).join('')}
@@ -613,7 +652,8 @@ function renderEmpBody(){
     return;
   }
   if(act){
-    const tookLunch=getFlag(emp.id,todayKey()).lunch||hasLunchGap(emp.id,todayKey());
+    const wd=workDayKey(emp.id);
+    const tookLunch=getFlag(emp.id,wd).lunch||hasLunchGap(emp.id,wd);
     const mode=lunchMode(act.role);
     // Button roles log lunch without leaving; clock-out roles punch out for it.
     const lunchBtn=tookLunch?''
@@ -629,7 +669,7 @@ function renderEmpBody(){
 
 function buildMyStatus(eid){
   const act=getActive(eid);
-  const today=act?dateKey(act.in):todayKey();
+  const today=workDayKey(eid);
   const fl=getFlag(eid,today);
   const eps=S.punches.filter(p=>p.eid===eid&&dateKey(p.in)===today).sort((a,b)=>new Date(a.in)-new Date(b.in));
   if(!eps.length&&!fl.lunch) return `<div class="card" style="margin-top:4px"><div class="ml" style="margin-bottom:8px">Today's status</div><div style="font-size:14px;color:#6C6C70">No activity yet today.</div></div>`;
@@ -647,7 +687,7 @@ function buildMyStatus(eid){
 
 async function takeLunch(){
   if(!requireOnline())return;
-  const eid=S.selId, today=todayKey();
+  const eid=S.selId, today=workDayKey(eid);
   if(getFlag(eid,today).lunch){showToast('Lunch already taken today');return}
   const k=`${eid}_${today}`; const f={...(S.flags[k]||{}),lunch:true};
   await dbSetFlag(eid,today,f);
@@ -709,6 +749,52 @@ function forgetDevice(){
 }
 
 function finishAndGoHome(msg){ clearReset(); goHome(); if(msg) showToast(msg,3000); }
+
+// ── NOTES ────────────────────────────────────────────────────
+function openNote(){ renderNote(); show('note'); }
+
+function renderNote(){
+  const emp=S.roster.find(e=>e.id===S.selId); if(!emp){goHome();return}
+  const body=document.getElementById('note-body'); if(!body)return;
+  const mine=S.notes.filter(n=>n.employee_id===emp.id&&n.status==='open');
+  body.innerHTML=`
+    <div class="card">
+      <div style="font-size:14px;color:#6C6C70;margin-bottom:2px">A question, a suggestion, anything that is not
+      about your hours. This goes straight to a manager.</div>
+      <label>Your note</label>
+      <textarea id="nt-body" rows="7" maxlength="1000" placeholder="What is on your mind?"
+        oninput="document.getElementById('nt-left').textContent=(1000-this.value.length)+' characters left'"></textarea>
+      <div id="nt-left" style="font-size:12px;color:#8E8E93;margin-top:4px">1000 characters left</div>
+    </div>
+    <div class="warn" style="margin-top:2px">
+      <div style="font-size:13px;color:#854F0B"><i class="ti ti-brand-discord"></i>
+      <strong>If you need a reply, it will come through Discord</strong> — not in this app. Nobody can answer you here.</div>
+    </div>
+    <button class="btn btn-green" id="nt-send" onclick="submitNote()">Send note</button>
+    <button class="btn btn-ghost" onclick="goHome()">Cancel</button>
+    ${mine.length?`<div class="card" style="margin-top:14px"><div class="ml" style="margin-bottom:8px">Sent, not yet read</div>${mine.map(n=>`<div style="font-size:13px;color:#6C6C70;margin-bottom:6px">${fmtDateDisp(dateKey(n.created_at))} — “${esc(n.body.slice(0,80))}${n.body.length>80?'…':''}”</div>`).join('')}</div>`:''}`;
+}
+
+async function submitNote(){
+  if(!requireOnline())return;
+  const emp=S.roster.find(e=>e.id===S.selId); if(!emp)return;
+  const body=(document.getElementById('nt-body').value||'').trim();
+  if(!body){showToast('⚠️ Write something first');return}
+  const btn=document.getElementById('nt-send'); if(btn){btn.disabled=true;btn.textContent='Sending…'}
+  const row={id:genId(),employee_id:emp.id,employee_name:emp.name,body:body.slice(0,1000)};
+  const {error}=await db.from('tc_notes').insert(row);
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Send note'}
+    // The database caps unread notes per person.
+    showToast(String(error.message||'').includes('note limit')
+      ? '⚠️ You have several notes waiting — give a manager a chance to read them'
+      : '⚠️ Could not send — try again');
+    return;
+  }
+  S.notes.unshift({...row,status:'open',created_at:new Date().toISOString()});
+  showToast('Note sent ✓ — any reply comes through Discord',4000);
+  goHome();
+}
 
 // ── MISSED PUNCH ─────────────────────────────────────────────
 function openMissed(){ renderMissed(); show('missed'); }
@@ -801,13 +887,45 @@ function openDash(){
 }
 function renderDashTabs(){
   const n=S.requests.filter(r=>r.status==='pending').length;
+  const m=S.notes.filter(x=>x.status==='open').length;
   const tabs=[['status','Status'],['daily','Daily'],['weekly','Weekly'],
-              ['requests', n?`Requests (${n})`:'Requests']];
+              ['requests', n?`Requests (${n})`:'Requests'],
+              ['notes', m?`Notes (${m})`:'Notes']];
   if(S.isAdmin)tabs.push(['settings','Settings']);
   document.getElementById('dash-tabs').innerHTML=tabs.map(([id,lbl])=>`<button class="tab${S.tab===id?' on':''}" onclick="setTab('${id}')">${lbl}</button>`).join('');
 }
 function setTab(t){ S.tab=t; S.showFlagSearch=false; S.editEmp=null; S.editRole=null; renderDashTabs(); renderDash(); }
-function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; if(S.tab==='status')b.innerHTML=buildStatus(); else if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else if(S.tab==='requests')b.innerHTML=buildRequests(); else b.innerHTML=buildSettings(); }
+function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; if(S.tab==='status')b.innerHTML=buildStatus(); else if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else if(S.tab==='requests')b.innerHTML=buildRequests(); else if(S.tab==='notes')b.innerHTML=buildNotes(); else b.innerHTML=buildSettings(); }
+
+// ── NOTES INBOX ──────────────────────────────────────────────
+function buildNotes(){
+  const open=S.notes.filter(n=>n.status==='open')
+    .sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  const read=S.notes.filter(n=>n.status!=='open')
+    .sort((a,b)=>(b.resolved_at||'').localeCompare(a.resolved_at||'')).slice(0,15);
+  const card=n=>`<div class="tc">
+      <div class="th"><span>${n.employee_name}</span>
+        <span style="font-size:12px;font-weight:400;color:#6C6C70">${fmtDateDisp(dateKey(n.created_at))} · ${fmtTime(n.created_at)}</span></div>
+      <div class="pr"><div style="font-size:15px;white-space:pre-wrap;line-height:1.5">${esc(n.body)}</div></div>
+      <div class="cr"><button class="del" style="color:#3B6D11;margin-left:auto" onclick="markNoteRead('${n.id}')">Mark read</button></div>
+    </div>`;
+  return `${open.length
+      ? `<div style="font-weight:500;font-size:15px;margin-bottom:4px">${open.length} unread</div>
+         <div style="font-size:12px;color:#8E8E93;margin-bottom:12px">Replies go through Discord — staff have been told that.</div>
+         ${open.map(card).join('')}`
+      : `<div style="text-align:center;color:#6C6C70;margin-top:40px;font-size:14px">No notes</div>`}
+    ${read.length?`<div style="font-weight:500;font-size:14px;margin:22px 0 8px;color:#6C6C70">Already read</div>${read.map(n=>`<div class="pr" style="background:#fff;border-radius:10px;border:1px solid #E5E5EA;margin-bottom:6px"><div style="display:flex;justify-content:space-between;gap:10px;margin-bottom:4px"><span style="font-size:13px;font-weight:500">${n.employee_name}</span><span style="font-size:12px;color:#8E8E93">${fmtDateDisp(dateKey(n.created_at))}</span></div><div style="font-size:13px;color:#6C6C70">${esc(n.body.slice(0,120))}${n.body.length>120?'…':''}</div></div>`).join('')}`:''}`;
+}
+
+async function markNoteRead(id){
+  if(!requireOnline())return;
+  const now=new Date().toISOString();
+  const {error}=await db.from('tc_notes')
+    .update({status:'read',resolved_at:now,resolved_by:S.isAdmin?'Admin':'Manager'}).eq('id',id);
+  if(error){showToast('⚠️ Could not save');return}
+  S.notes=S.notes.map(n=>n.id===id?{...n,status:'read',resolved_at:now}:n);
+  renderDashTabs(); renderDash();
+}
 
 // ── REQUESTS ─────────────────────────────────────────────────
 // Deliberately read-only: a missed punch is a claim about something the clock
