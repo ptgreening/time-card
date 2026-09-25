@@ -473,7 +473,7 @@ function setupRealtime(){
 function show(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on')); document.getElementById(id).classList.add('on'); }
 function clearReset(){ if(S.resetTimer){clearTimeout(S.resetTimer);S.resetTimer=null} if(S.resetInterval){clearInterval(S.resetInterval);S.resetInterval=null} }
 function goHome(){
-  clearReset(); show('home'); renderHdr();
+  clearReset(); S.afterCode=null; show('home'); renderHdr();
   const s=document.getElementById('search'); if(s)s.value='';
   document.getElementById('search-results').innerHTML='';
   renderHome();
@@ -714,7 +714,7 @@ async function takeLunch(){
   if(getFlag(eid,today).lunch){showToast('Lunch already taken today');return}
   const k=`${eid}_${today}`; const f={...(S.flags[k]||{}),lunch:true};
   await dbSetFlag(eid,today,f);
-  showToast('Lunch recorded — 30 min deducted ✓'); renderEmpBody();
+  finishAndGoHome('Lunch recorded — 30 min deducted ✓');
 }
 
 async function doClockIn(){
@@ -724,9 +724,8 @@ async function doClockIn(){
   if(!empRoles(emp).includes(role)||!empLocs(emp).includes(loc)){showToast('⚠️ You are not assigned to that role or location');return;}
   const ok=await dbClockIn(emp.id,emp.name,role,loc);
   if(!ok){showToast('⚠️ Save failed — check connection');return}
-  if(S.isPersonalDevice){ showToast(`Clocked in as ${role} ✓`); renderEmpBody(); }
-  else if(isSharedDevice()){ finishAndGoHome(`Clocked in as ${role} ✓`); }
-  else { offerRememberMe(emp,role); }
+  if(S.isPersonalDevice||isSharedDevice()) finishAndGoHome(`Clocked in as ${role} ✓`);
+  else offerRememberMe(emp,role);
 }
 
 async function doClockOut(pid,forLunch){
@@ -734,8 +733,7 @@ async function doClockOut(pid,forLunch){
   const ok=await dbClockOut(pid,forLunch);
   if(!ok){showToast('⚠️ Save failed — check connection');return}
   const msg=forLunch?'On lunch — clock back in after 30 minutes':'Clocked out — have a great day!';
-  if(S.isPersonalDevice){ showToast(msg); renderEmpBody(); }
-  else { finishAndGoHome(msg); }
+  finishAndGoHome(msg);
 }
 
 async function doSwitch(pid){
@@ -744,8 +742,7 @@ async function doSwitch(pid){
   const emp=S.roster.find(e=>e.id===S.selId);
   if(!empRoles(emp).includes(nr)||!empLocs(emp).includes(nl)){showToast('⚠️ You are not assigned to that role or location');return;}
   await dbSwitchRole(pid,nr,nl); S.switchMode=false;
-  if(S.isPersonalDevice){ showToast(`Switched to ${nr} ✓`); renderEmpBody(); }
-  else { finishAndGoHome(`Switched to ${nr} ✓`); }
+  finishAndGoHome(`Switched to ${nr} ✓`);
 }
 
 function offerRememberMe(emp,role){
