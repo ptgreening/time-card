@@ -140,7 +140,8 @@
     <span style="width:60px"></span>
   </div>
   <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px">
-    <div id="ec-msg" style="font-size:15px;color:#6C6C70;margin-bottom:28px">Enter your code</div>
+    <div id="ec-msg" style="font-size:15px;color:#6C6C70;margin-bottom:8px">Enter your code</div>
+    <div id="ec-sub" style="font-size:14px;color:#6C6C70;text-align:center;max-width:300px;margin-bottom:20px"></div>
     <div id="ec-dots" style="display:flex;gap:12px;margin-bottom:36px"></div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:260px" id="ec-pad"></div>
   </div>
@@ -531,7 +532,8 @@ function buildMyDay(emp){
     if(!tookLunch&&mode==='button') acts.push(['btn-amber','ti-tools-kitchen-2','Take lunch (30 min)',`requireCode(()=>takeLunch())`]);
     if(!tookLunch&&mode==='clockout') acts.push(['btn-amber','ti-tools-kitchen-2','Start lunch (clock out 30 min)',`requireCode(()=>doClockOut('${act.id}',true))`]);
     acts.push(['btn-ghost','ti-refresh','Switch role / location',`requireCode(()=>{S.switchMode=true;showEmpScreen()})`]);
-    acts.push(['btn-red','ti-logout','Clock out'+(acts.length?' — done for the day':''),`requireCode(()=>doClockOut('${act.id}'))`]);
+    acts.push(['btn-red','ti-logout','Clock out — done for the day',
+      `confirmClockOut('${emp.id}','${act.id}')`]);
   } else {
     acts.push([chk.ok?'btn-green':'btn-ghost','ti-login','Clock in',`requireCode(()=>showEmpScreen())`]);
   }
@@ -564,17 +566,38 @@ function grantCode(){ S.codeOkUntil = Date.now() + CODE_GRACE_MS; }
 function dropCode(){ S.codeOkUntil = 0; }
 
 // Run fn now if the code is not needed or still good, otherwise ask for it first.
-function requireCode(fn){
+// `force` ignores the grace period — used for clocking out, where typing the code
+// is the confirmation. `sub` is a line describing what is being confirmed.
+function requireCode(fn,{force=false,sub=''}={}){
   const emp=S.roster.find(e=>e.id===S.selId);
   if(!emp) return;
-  if(!emp.code || codeStillValid()){ fn(); return; }
-  S.afterCode=fn; openCodeEntry(emp);
+  if(!emp.code){
+    // No code set for this person, so the only guard left is a plain confirmation.
+    if(sub && !confirm(sub)) return;
+    fn(); return;
+  }
+  if(codeStillValid() && !force){ fn(); return; }
+  S.afterCode=fn; openCodeEntry(emp,sub);
 }
-function openCodeEntry(emp){
+function openCodeEntry(emp,sub){
   S.empCodeBuf=''; S.empCodeErr=false;
   document.getElementById('ec-name').textContent=emp.name;
   document.getElementById('ec-msg').textContent=`Enter your ${emp.code.length}-digit code`;
+  const e=document.getElementById('ec-sub'); if(e) e.textContent=sub||'';
   buildEmpCode(); show('emp-code');
+}
+
+// Ending a shift is the action people most regret tapping by accident, so it
+// always asks for the code even inside the grace window, and shows what is being
+// ended so the hours are visible before they commit.
+function clockOutSummary(eid){
+  const act=getActive(eid); if(!act) return 'Clock out?';
+  const mins=Math.floor((Date.now()-new Date(act.in))/60000);
+  return `Clocking out of ${act.role} — in at ${fmtTime(act.in)}, `
+       + `${Math.floor(mins/60)}h ${mins%60}m on the clock.`;
+}
+function confirmClockOut(eid,pid){
+  requireCode(()=>doClockOut(pid),{force:true,sub:clockOutSummary(eid)});
 }
 
 // ── EMPLOYEE CODE ────────────────────────────────────────────
@@ -660,7 +683,7 @@ function renderEmpBody(){
       :mode==='button'?`<button class="btn btn-amber" onclick="takeLunch()"><i class="ti ti-tools-kitchen-2"></i> Take lunch (30 min)</button>`
       :mode==='clockout'?`<button class="btn btn-amber" onclick="doClockOut('${act.id}',true)"><i class="ti ti-tools-kitchen-2"></i> Start lunch (clock out 30 min)</button>`
       :'';
-    body.innerHTML=`<div class="active-card"><div class="ml" style="color:#3B6D11;margin-bottom:8px">Currently clocked in</div><div style="font-size:20px;font-weight:500;margin-bottom:2px">${act.role}</div><div style="font-size:13px;color:#6C6C70;margin-bottom:14px">${act.loc}</div><div style="display:flex;gap:24px"><div><div class="ml">Clock in</div><div style="font-size:15px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div><div><div class="ml">Elapsed</div><div id="el-val" style="font-size:15px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div></div></div>${S.switchMode?`<div class="card"><div style="font-weight:500;margin-bottom:4px">Switch to…</div>${picker('sw-r','New role',myRoles)}${picker('sw-l','Location',myLocs)}<button class="btn btn-amber" onclick="doSwitch('${act.id}')">Confirm switch</button><button class="btn btn-ghost" onclick="S.switchMode=false;renderEmpBody()">Cancel</button></div>`:`${lunchBtn}<button class="btn btn-ghost" onclick="S.switchMode=true;renderEmpBody()"><i class="ti ti-refresh"></i> Switch role / location</button><button class="btn btn-red" onclick="doClockOut('${act.id}')">${lunchBtn?'Clock out — done for the day':'Clock out'}</button>`}${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
+    body.innerHTML=`<div class="active-card"><div class="ml" style="color:#3B6D11;margin-bottom:8px">Currently clocked in</div><div style="font-size:20px;font-weight:500;margin-bottom:2px">${act.role}</div><div style="font-size:13px;color:#6C6C70;margin-bottom:14px">${act.loc}</div><div style="display:flex;gap:24px"><div><div class="ml">Clock in</div><div style="font-size:15px;font-weight:500;margin-top:3px">${fmtTime(act.in)}</div></div><div><div class="ml">Elapsed</div><div id="el-val" style="font-size:15px;font-weight:500;margin-top:3px">${elapsed(act.in)}</div></div></div></div>${S.switchMode?`<div class="card"><div style="font-weight:500;margin-bottom:4px">Switch to…</div>${picker('sw-r','New role',myRoles)}${picker('sw-l','Location',myLocs)}<button class="btn btn-amber" onclick="doSwitch('${act.id}')">Confirm switch</button><button class="btn btn-ghost" onclick="S.switchMode=false;renderEmpBody()">Cancel</button></div>`:`${lunchBtn}<button class="btn btn-ghost" onclick="S.switchMode=true;renderEmpBody()"><i class="ti ti-refresh"></i> Switch role / location</button><button class="btn btn-red" onclick="confirmClockOut('${emp.id}','${act.id}')">Clock out — done for the day</button>`}${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
   } else {
     const chk=canClockIn(emp.id);
     body.innerHTML=`${!chk.ok?`<div class="warn"><div style="font-weight:500;font-size:14px;color:#BA7517;margin-bottom:2px"><i class="ti ti-clock"></i> Break in progress</div><div style="font-size:13px;color:#854F0B">You can clock back in after <strong>${chk.wu.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true})}</strong></div></div>`:''}<div class="card"><div style="font-size:14px;color:#6C6C70;margin-bottom:4px">${myRoles.length===1&&myLocs.length===1?'Confirm and clock in':'Select your role and location'}</div>${picker('ci-r','Role',myRoles)}${picker('ci-l','Location',myLocs)}</div><button class="btn btn-green" onclick="doClockIn()" ${!chk.ok?'disabled style="opacity:.4;cursor:not-allowed"':''}>Clock in</button>${statusHtml}${weekHtml}${mainBtn}${notYouHtml}`;
