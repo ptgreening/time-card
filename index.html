@@ -116,7 +116,7 @@
 <div id="note" class="screen">
   <div class="hdr">
     <button class="back" onclick="goHome()"><i class="ti ti-arrow-left"></i> Back</button>
-    <span style="font-weight:500;font-size:17px">Send a note</span>
+    <span style="font-weight:500;font-size:17px">Send note to admin</span>
     <span style="width:60px"></span>
   </div>
   <div class="body" id="note-body"></div>
@@ -536,7 +536,7 @@ function buildMyDay(emp){
     acts.push([chk.ok?'btn-green':'btn-ghost','ti-login','Clock in',`requireCode(()=>showEmpScreen())`]);
   }
   acts.push(['btn-ghost','ti-alert-circle','Report a missed punch',`requireCode(()=>openMissed())`]);
-  acts.push(['btn-ghost','ti-message-2','Send a note to a manager',`requireCode(()=>openNote())`]);
+  acts.push(['btn-ghost','ti-message-2','Send note to admin',`requireCode(()=>openNote())`]);
 
   return `<div class="active-card" style="${act?'':'border-color:#E5E5EA'}">${head}${rows}</div>
     ${acts.map(([c,i,t,fn])=>`<button class="btn ${c}" onclick="${fn}"><i class="ti ${i}"></i> ${t}</button>`).join('')}
@@ -759,8 +759,10 @@ function renderNote(){
   const mine=S.notes.filter(n=>n.employee_id===emp.id&&n.status==='open');
   body.innerHTML=`
     <div class="card">
-      <div style="font-size:14px;color:#6C6C70;margin-bottom:2px">A question, a suggestion, anything that is not
-      about your hours. This goes straight to a manager.</div>
+      <div style="font-size:14px;color:#6C6C70;margin-bottom:8px">Ask a question, a suggestion, or anything that is
+      NOT a missed punch.</div>
+      <div style="font-size:14px;color:#6C6C70">Also note: the admin can only help (and only cares about) this time
+      clock app — any other Trail questions need to be directed to your manager!</div>
       <label>Your note</label>
       <textarea id="nt-body" rows="7" maxlength="1000" placeholder="What is on your mind?"
         oninput="document.getElementById('nt-left').textContent=(1000-this.value.length)+' characters left'"></textarea>
@@ -787,7 +789,7 @@ async function submitNote(){
     if(btn){btn.disabled=false;btn.textContent='Send note'}
     // The database caps unread notes per person.
     showToast(String(error.message||'').includes('note limit')
-      ? '⚠️ You have several notes waiting — give a manager a chance to read them'
+      ? '⚠️ You have several notes waiting — give the admin a chance to read them'
       : '⚠️ Could not send — try again');
     return;
   }
@@ -809,8 +811,8 @@ function renderMissed(){
     .sort((a,b)=>b.created_at.localeCompare(a.created_at));
   body.innerHTML=`
     <div class="card">
-      <div style="font-size:14px;color:#6C6C70;margin-bottom:2px">Tell a manager about a punch you missed. This does not change your
-      time — a manager reviews it and makes the correction.</div>
+      <div style="font-size:14px;color:#6C6C70;margin-bottom:2px">Tell the time clock admin about a punch you missed. This does not
+      change your time — the admin reviews it and makes the correction.</div>
       <label>Date of the missed punch</label>
       <input type="date" id="mp-date" value="${today}" min="${min}" max="${today}" />
       <label>Which punch was missed</label>
@@ -855,12 +857,12 @@ async function submitMissed(){
     if(btn){btn.disabled=false;btn.textContent='Submit report'}
     // The unique index refuses a second open report for the same day and type.
     showToast(error.code==='23505'
-      ? '⚠️ You already reported that punch — a manager has it'
+      ? '⚠️ You already reported that punch — the admin has it'
       : '⚠️ Could not send — try again');
     return;
   }
   S.requests.push({...row,status:'pending',created_at:new Date().toISOString()});
-  showToast('Report sent to a manager ✓',3000);
+  showToast('Report sent to the time clock admin ✓',3000);
   goHome();
 }
 
