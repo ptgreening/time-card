@@ -4,3 +4,6 @@
 /install    /install.html   200
 /app        /install.html   200
 /kiosk      /index.html?kiosk=1   200
+/how-to     /how-to.html   200
+/help       /how-to.html   200
+/guide      /how-to.html   200

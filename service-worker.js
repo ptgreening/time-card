@@ -11,7 +11,7 @@
  */
 
 // Bumping this name drops every previously cached file on the next visit.
-const CACHE = 'timeclock-v2';
+const CACHE = 'timeclock-v3';
 
 const SHELL = [
   '/',
@@ -53,11 +53,14 @@ self.addEventListener('fetch', e => {
     e.respondWith(
       fetch(req)
         .then(res => {
+          // Key each page by its own URL. Keying everything as /index.html meant a
+          // visit to any other page overwrote the cached time clock with it, so
+          // opening the app offline showed the wrong page.
           const copy = res.clone();
-          caches.open(CACHE).then(c => c.put('/index.html', copy));
+          caches.open(CACHE).then(c => c.put(req, copy));
           return res;
         })
-        .catch(() => caches.match('/index.html').then(r => r || caches.match('/')))
+        .catch(() => caches.match(req).then(r => r || caches.match('/index.html')))
     );
     return;
   }
