@@ -1152,8 +1152,22 @@ function addFlagEmp(eid){ const k=`${eid}_${S.viewDate}`; if(!S.flags[k])S.flags
 function changeDay(d){ const dt=new Date(S.viewDate+'T12:00:00'); dt.setDate(dt.getDate()+d); const nk=dateKey(dt.toISOString()); if(nk>todayKey())return; S.viewDate=nk; renderDash(); }
 function editTime(pid,field,t){
   const punch=S.punches.find(p=>p.id===pid); if(!punch)return;
-  const base=(field==='in'?punch.in:(punch.out||punch.in)).split('T')[0];
-  const newIso=tToIso(t,base);
+  // The day an edited time belongs to is the LOCAL day of the shift. Splitting
+  // the stored ISO string took the UTC day instead, and Pacific evenings are
+  // already tomorrow in UTC — so editing any shift that started after 5pm moved
+  // it a day and could put the clock out before the clock in.
+  let newIso=tToIso(t,dateKey(punch.in));
+  if(field==='in'){
+    if(punch.out && new Date(newIso)>=new Date(punch.out)){
+      showToast('⚠️ Clock in must come before clock out'); renderDash(); return;
+    }
+  } else {
+    // A clock out landing before the clock in is a shift that ran past midnight.
+    if(new Date(newIso)<=new Date(punch.in)){
+      const d=new Date(punch.in); d.setDate(d.getDate()+1);
+      newIso=tToIso(t,dateKey(d.toISOString()));
+    }
+  }
   dbEditTime(pid,field,newIso);
   const el=document.getElementById(`hrs-${punch.eid}`);
   if(el)el.textContent=`${hoursD(netMs(punch.eid,S.viewDate))} hrs`;
