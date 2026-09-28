@@ -179,6 +179,10 @@
     <span style="width:60px"></span>
   </div>
   <div class="tab-bar" id="dash-tabs"></div>
+  <div id="dash-filter" style="background:#fff;border-bottom:1px solid #E5E5EA;padding:8px 16px;display:none;align-items:center;gap:10px">
+    <span style="font-size:12px;color:#6C6C70;white-space:nowrap">Location</span>
+    <select id="locf" onchange="setLocFilter(this.value)" style="margin-top:0;padding:6px 10px;font-size:13px"></select>
+  </div>
   <div class="body" id="dash-body"></div>
 </div>
 
@@ -211,7 +215,7 @@ const S = {
   pinBuf:'', pinErr:false, switchMode:false,
   empCodeBuf:'', empCodeErr:false, codeOk:false,
   codeOkUntil:0, afterCode:null, requests:[], notes:[],
-  editEmp:null, editRole:null,
+  editEmp:null, editRole:null, locFilter:'', addEntry:null,
   showFlagSearch:false, resetTimer:null, resetInterval:null
 };
 // Opening the app as .../?kiosk=1 marks the device a shared kiosk for good, so a
@@ -908,6 +912,22 @@ function openDash(){
   document.getElementById('dash-title').textContent=S.isAdmin?'Admin':'Manager';
   renderDashTabs(); renderDash(); show('dashboard');
 }
+// An empty filter means every location. Day flags carry no location of their
+// own, so they only appear when nothing is filtered out.
+function atLoc(p){ return !S.locFilter || p.loc===S.locFilter; }
+function filteredPunches(){ return S.locFilter ? S.punches.filter(atLoc) : S.punches; }
+
+function setLocFilter(v){ S.locFilter=v; renderDash(); }
+function renderDashFilter(){
+  const bar=document.getElementById('dash-filter'), sel=document.getElementById('locf');
+  if(!bar||!sel) return;
+  const show=['status','daily','weekly'].includes(S.tab) && S.config.locations.length>1;
+  bar.style.display = show ? 'flex' : 'none';
+  if(!show) return;
+  sel.innerHTML=`<option value="">All locations</option>`+
+    S.config.locations.map(l=>`<option value="${esc(l)}"${S.locFilter===l?' selected':''}>${esc(l)}</option>`).join('');
+}
+
 function renderDashTabs(){
   const n=S.requests.filter(r=>r.status==='pending').length;
   const m=S.notes.filter(x=>x.status==='open').length;
@@ -917,8 +937,8 @@ function renderDashTabs(){
   if(S.isAdmin)tabs.push(['settings','Settings']);
   document.getElementById('dash-tabs').innerHTML=tabs.map(([id,lbl])=>`<button class="tab${S.tab===id?' on':''}" onclick="setTab('${id}')">${lbl}</button>`).join('');
 }
-function setTab(t){ S.tab=t; S.showFlagSearch=false; S.editEmp=null; S.editRole=null; renderDashTabs(); renderDash(); }
-function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; if(S.tab==='status')b.innerHTML=buildStatus(); else if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else if(S.tab==='requests')b.innerHTML=buildRequests(); else if(S.tab==='notes')b.innerHTML=buildNotes(); else b.innerHTML=buildSettings(); }
+function setTab(t){ S.tab=t; S.showFlagSearch=false; S.addEntry=null; S.editEmp=null; S.editRole=null; renderDashTabs(); renderDash(); }
+function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; renderDashFilter(); if(S.tab==='status')b.innerHTML=buildStatus(); else if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else if(S.tab==='requests')b.innerHTML=buildRequests(); else if(S.tab==='notes')b.innerHTML=buildNotes(); else b.innerHTML=buildSettings(); }
 
 // ── NOTES INBOX ──────────────────────────────────────────────
 function buildNotes(){
@@ -998,9 +1018,9 @@ async function resolveRequest(id,status){
 // ── QUICK STATUS (live) ──────────────────────────────────────
 function buildStatus(){
   const today=todayKey();
-  const active=S.punches.filter(p=>!p.out).sort((a,b)=>new Date(a.in)-new Date(b.in));
+  const active=S.punches.filter(p=>!p.out&&atLoc(p)).sort((a,b)=>new Date(a.in)-new Date(b.in));
   const header=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div><div style="font-weight:500;font-size:15px">Clocked in now</div><div style="font-size:12px;color:#6C6C70">${active.length} ${active.length===1?'person':'people'} on the clock</div></div><button class="wn" onclick="renderDash()" style="font-size:13px">Refresh</button></div>`;
-  if(!active.length) return header+`<div style="text-align:center;color:#6C6C70;margin-top:40px;font-size:14px">Nobody is clocked in right now</div>`;
+  if(!active.length) return header+`<div style="text-align:center;color:#6C6C70;margin-top:40px;font-size:14px">Nobody is clocked in${S.locFilter?' at '+esc(S.locFilter):' right now'}</div>`;
   const byLoc={};
   active.forEach(p=>{ (byLoc[p.loc]=byLoc[p.loc]||[]).push(p); });
   const blocks=Object.entries(byLoc).sort(([a],[b])=>a.localeCompare(b)).map(([loc,ps])=>{
@@ -1020,16 +1040,98 @@ function buildStatus(){
 // ── DAILY VIEW ───────────────────────────────────────────────
 function buildDaily(){
   const date=S.viewDate;
-  const dayPs=S.punches.filter(p=>dateKey(p.in)===date||(p.out&&dateKey(p.out)===date));
-  const eids=[...new Set([...dayPs.map(p=>p.eid),...Object.keys(S.flags).filter(k=>k.endsWith('_'+date)).map(k=>k.slice(0,-(date.length+1)))])];
-  const empCards=eids.length===0?`<div style="text-align:center;color:#6C6C70;margin-top:40px;font-size:14px">No activity on this date</div>`:eids.map(eid=>{
+  const dayPs=S.punches.filter(p=>atLoc(p)&&(dateKey(p.in)===date||(p.out&&dateKey(p.out)===date)));
+  const flagEids=S.locFilter?[]:Object.keys(S.flags).filter(k=>k.endsWith('_'+date)).map(k=>k.slice(0,-(date.length+1)));
+  const eids=[...new Set([...dayPs.map(p=>p.eid),...flagEids])];
+  const empCards=eids.length===0?`<div style="text-align:center;color:#6C6C70;margin-top:40px;font-size:14px">No activity on this date${S.locFilter?' at '+esc(S.locFilter):''}</div>`:eids.map(eid=>{
     const name=S.roster.find(e=>e.id===eid)?.name||dayPs.find(p=>p.eid===eid)?.name||'Unknown';
     const eps=dayPs.filter(p=>p.eid===eid).sort((a,b)=>new Date(a.in)-new Date(b.in));
     const fl=getFlag(eid,date);
     return`<div class="tc"><div class="th"><span>${name}</span><div style="display:flex;align-items:center;gap:6px">${alertChips(eid,date)}<span id="hrs-${eid}" style="font-size:12px;font-weight:400;color:#6C6C70">${hoursD(netMs(eid,date))} hrs</span></div></div>${eps.map(p=>`<div class="pr"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div class="ml">${p.role} · ${p.loc}</div>${S.isAdmin?`<button class="del" onclick="deletePunch('${p.id}')"><i class="ti ti-trash"></i> Delete</button>`:''}</div><div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><div style="font-size:10px;color:#6C6C70;margin-bottom:3px">IN</div><input type="time" value="${isoToT(p.in)}" onchange="editTime('${p.id}','in',this.value)"/></div><span style="color:#C7C7CC;margin-top:14px;flex-shrink:0">→</span><div style="flex:1"><div style="font-size:10px;color:#6C6C70;margin-bottom:3px">OUT</div>${p.out?`<input type="time" value="${isoToT(p.out)}" onchange="editTime('${p.id}','out',this.value)"/>`:`<div style="font-size:12px;color:#3B6D11;padding:6px 8px;border:1px solid #3B6D11;border-radius:8px;text-align:center">Active</div>`}</div></div></div>`).join('')}<div class="cr"><label class="cl"><input type="checkbox" ${fl.lunch?'checked':''} onchange="setFlag('${eid}','${date}','lunch',this.checked)" style="width:auto;margin:0"/>Deduct 30-min lunch</label></div><div class="cr"><label class="cl"><input type="checkbox" ${fl.ncns?'checked':''} onchange="setFlag('${eid}','${date}','ncns',this.checked)" style="width:auto;margin:0"/>No Call No Show</label><label class="cl"><input type="checkbox" ${fl.short?'checked':''} onchange="setFlag('${eid}','${date}','short',this.checked)" style="width:auto;margin:0">&lt;2hr Notice</label></div></div>`;
   }).join('');
+  const addSection=S.addEntry?buildAddEntry():'';
   const flagSection=S.showFlagSearch?`<div class="card" style="margin-top:12px"><div style="font-weight:500;margin-bottom:8px">Flag absent employee</div><input id="fs" placeholder="Type name…" oninput="renderFlagSearch()" autocomplete="off" style="margin-top:0"/><div id="fsr" style="margin-top:8px"></div><button class="btn btn-ghost" onclick="S.showFlagSearch=false;renderDash()" style="margin-top:8px">Cancel</button></div>`:'';
-  return`<div class="wb"><button class="wn" onclick="changeDay(-1)">&#8592; Prev</button><div style="text-align:center"><div style="font-weight:500;font-size:13px">${fmtDateDisp(date)}</div>${date===todayKey()?'<div style="font-size:11px;color:#BA7517;font-weight:500">Today</div>':''}</div><button class="wn" onclick="changeDay(1)" ${date>=todayKey()?'disabled style="opacity:.3"':''}>Next &#8594;</button></div>${empCards}${flagSection}<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button onclick="S.showFlagSearch=!S.showFlagSearch;renderDash()" style="background:none;border:1px solid #C7C7CC;border-radius:8px;padding:7px 12px;font-size:13px;color:#6C6C70;cursor:pointer"><i class="ti ti-flag"></i> Flag absent employee</button>${S.isAdmin?`<button onclick="exportCSV('day')" style="background:#EF9F27;border:none;border-radius:8px;padding:7px 12px;font-size:13px;color:#412402;cursor:pointer"><i class="ti ti-download"></i> Export day</button>`:''}</div>`;
+  return`<div class="wb"><button class="wn" onclick="changeDay(-1)">&#8592; Prev</button><div style="text-align:center"><div style="font-weight:500;font-size:13px">${fmtDateDisp(date)}</div>${date===todayKey()?'<div style="font-size:11px;color:#BA7517;font-weight:500">Today</div>':''}</div><button class="wn" onclick="changeDay(1)" ${date>=todayKey()?'disabled style="opacity:.3"':''}>Next &#8594;</button></div>${empCards}${addSection}${flagSection}<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">${S.isAdmin?`<button onclick="S.addEntry={eid:null};S.showFlagSearch=false;renderDash()" style="background:none;border:1px solid #EF9F27;border-radius:8px;padding:7px 12px;font-size:13px;color:#BA7517;cursor:pointer"><i class="ti ti-plus"></i> Add time entry</button>`:''}<button onclick="S.showFlagSearch=!S.showFlagSearch;S.addEntry=null;renderDash()" style="background:none;border:1px solid #C7C7CC;border-radius:8px;padding:7px 12px;font-size:13px;color:#6C6C70;cursor:pointer"><i class="ti ti-flag"></i> Flag absent employee</button>${S.isAdmin?`<button onclick="exportCSV('day')" style="background:#EF9F27;border:none;border-radius:8px;padding:7px 12px;font-size:13px;color:#412402;cursor:pointer"><i class="ti ti-download"></i> Export day</button>`:''}</div>`;
+}
+
+// Someone who never clocked in has no row to edit, so the day has to be able to
+// gain an entry from nothing. Admin only, and every entry records both times up
+// front — an entry left open would look like a live shift.
+function buildAddEntry(){
+  const a=S.addEntry;
+  const emp=a.eid?S.roster.find(e=>e.id===a.eid):null;
+  const roles=emp?empRoles(emp):S.config.roles;
+  const locs=emp?empLocs(emp):S.config.locations;
+  return `<div class="card" style="margin-top:12px;border-color:#EF9F27">
+    <div style="font-weight:500;margin-bottom:2px">Add a time entry</div>
+    <div style="font-size:12px;color:#6C6C70">${fmtDateDisp(S.viewDate)}</div>
+    ${emp
+      ? `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:10px 12px;background:#F9F9FB;border-radius:10px">
+           <span style="font-weight:500">${esc(emp.name)}</span>
+           <button class="del" style="color:#007AFF" onclick="S.addEntry.eid=null;renderDash()">Change</button>
+         </div>
+         <label>Role</label>
+         <select id="ae-role">${roles.map(r=>`<option${r===a.role?' selected':''}>${esc(r)}</option>`).join('')}</select>
+         <label>Location</label>
+         <select id="ae-loc">${locs.map(l=>`<option${l===a.loc?' selected':''}>${esc(l)}</option>`).join('')}</select>
+         <div style="display:flex;gap:10px">
+           <div style="flex:1"><label>Clock in</label><input type="time" id="ae-in" value="${a.in||''}"/></div>
+           <div style="flex:1"><label>Clock out</label><input type="time" id="ae-out" value="${a.out||''}"/></div>
+         </div>
+         <div style="font-size:12px;color:#6C6C70;margin-top:6px">If the shift ran past midnight, enter the clock out
+         time as it was on the clock — it is recorded on the next day automatically.</div>
+         <button class="btn btn-green" id="ae-save" onclick="saveAddEntry()">Add entry</button>`
+      : `<label>Who is it for?</label>
+         <input id="ae-search" placeholder="Type name…" oninput="renderAddSearch()" autocomplete="off"/>
+         <div id="ae-results" style="margin-top:8px"></div>`}
+    <button class="btn btn-ghost" onclick="S.addEntry=null;renderDash()">Cancel</button>
+  </div>`;
+}
+
+function renderAddSearch(){
+  const q=(document.getElementById('ae-search')||{}).value||'';
+  const el=document.getElementById('ae-results'); if(!el)return;
+  if(!q.trim()){el.innerHTML='';return}
+  const f=S.roster.filter(e=>e.name.toLowerCase().includes(q.toLowerCase()))
+    .sort((a,b)=>a.name.localeCompare(b.name)).slice(0,6);
+  el.innerHTML=f.length
+    ? f.map(e=>`<button onclick="pickAddEmp('${e.id}')" style="display:block;width:100%;padding:10px 12px;background:#F9F9FB;border:1px solid #E5E5EA;border-radius:8px;text-align:left;cursor:pointer;font-size:14px;font-family:inherit;color:#000;margin-bottom:4px">${esc(e.name)}</button>`).join('')
+    : `<p style="font-size:13px;color:#6C6C70">No match</p>`;
+}
+
+function pickAddEmp(eid){
+  const emp=S.roster.find(e=>e.id===eid); if(!emp)return;
+  S.addEntry={eid,role:empRoles(emp)[0]||'',loc:S.locFilter||empLocs(emp)[0]||'',in:'',out:''};
+  renderDash();
+}
+
+async function saveAddEntry(){
+  if(!requireOnline())return;
+  const a=S.addEntry, emp=S.roster.find(e=>e.id===a.eid); if(!emp)return;
+  const role=document.getElementById('ae-role').value;
+  const loc=document.getElementById('ae-loc').value;
+  const tin=document.getElementById('ae-in').value;
+  const tout=document.getElementById('ae-out').value;
+  if(!tin||!tout){showToast('⚠️ Enter both times');return}
+  const inIso=tToIso(tin,S.viewDate);
+  let outIso=tToIso(tout,S.viewDate);
+  // A clock out earlier than the clock in means the shift crossed midnight.
+  if(new Date(outIso)<=new Date(inIso)){
+    const d=new Date(S.viewDate+'T12:00:00'); d.setDate(d.getDate()+1);
+    outIso=tToIso(tout,dateKey(d.toISOString()));
+  }
+  const hrs=(new Date(outIso)-new Date(inIso))/3600000;
+  if(hrs>16&&!confirm(`That is a ${hrs.toFixed(1)} hour shift. Add it anyway?`))return;
+  const btn=document.getElementById('ae-save'); if(btn){btn.disabled=true;btn.textContent='Adding…'}
+  const id=genId();
+  const {error}=await db.from('tc_punches').insert({id,employee_id:emp.id,employee_name:emp.name,
+    role,location:loc,clock_in:inIso,clock_out:outIso,lunch_out:false});
+  if(error){
+    if(btn){btn.disabled=false;btn.textContent='Add entry'}
+    showToast('⚠️ Could not save — try again'); return;
+  }
+  S.punches.push({id,eid:emp.id,name:emp.name,role,loc,in:inIso,out:outIso,lunchOut:false});
+  S.addEntry=null; showToast(`Entry added for ${emp.name} ✓`); renderDash();
 }
 
 function renderFlagSearch(){
@@ -1067,7 +1169,7 @@ function buildWeekly(){
   const ws=weekStart(S.wkOff),we=new Date(ws); we.setDate(we.getDate()+6);
   const fmtWk=d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
   const wEnd=new Date(we.getTime()+864e5);
-  const wkp=S.punches.filter(p=>p.out&&new Date(p.in)>=ws&&new Date(p.in)<wEnd);
+  const wkp=S.punches.filter(p=>p.out&&atLoc(p)&&new Date(p.in)>=ws&&new Date(p.in)<wEnd);
   const sum={};
   wkp.forEach(p=>{ if(!sum[p.eid])sum[p.eid]={name:p.name,roles:{},dates:new Set()}; const ms=new Date(p.out)-new Date(p.in); sum[p.eid].roles[p.role]=(sum[p.eid].roles[p.role]||0)+ms; sum[p.eid].dates.add(dateKey(p.in)); });
   const empList=Object.entries(sum).sort(([,a],[,b])=>a.name.localeCompare(b.name));
@@ -1319,8 +1421,10 @@ async function savePins(){
 // ── EXPORT ────────────────────────────────────────────────────
 function exportCSV(mode){
   let punches,title;
-  if(mode==='day'){punches=S.punches.filter(p=>p.out&&dateKey(p.in)===S.viewDate);title=`day-${S.viewDate}`}
-  else{const ws=weekStart(S.wkOff),wEnd=new Date(ws);wEnd.setDate(wEnd.getDate()+7);punches=S.punches.filter(p=>p.out&&new Date(p.in)>=ws&&new Date(p.in)<wEnd);title=`week-${dateKey(ws.toISOString())}`}
+  const src=filteredPunches();
+  if(mode==='day'){punches=src.filter(p=>p.out&&dateKey(p.in)===S.viewDate);title=`day-${S.viewDate}`}
+  else{const ws=weekStart(S.wkOff),wEnd=new Date(ws);wEnd.setDate(wEnd.getDate()+7);punches=src.filter(p=>p.out&&new Date(p.in)>=ws&&new Date(p.in)<wEnd);title=`week-${dateKey(ws.toISOString())}`}
+  if(S.locFilter) title+=`-${S.locFilter.replace(/[^\w-]+/g,'_')}`;
   const roles=S.config.roles,rows=[['Employee','Date','First In','Last Out',...roles,'Lunch Deducted','Net Total','MBP','OT (8+ day)','NCNS','<2hr Notice']];
   const ed={};
   punches.forEach(p=>{const dk=dateKey(p.in),k=`${p.eid}|${dk}`;if(!ed[k])ed[k]={eid:p.eid,name:p.name,date:dk,punches:[],rm:{}};const ms=new Date(p.out)-new Date(p.in);ed[k].punches.push(p);ed[k].rm[p.role]=(ed[k].rm[p.role]||0)+ms});
