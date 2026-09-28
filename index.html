@@ -253,7 +253,15 @@ function hoursD(ms){ return (Math.max(0,ms)/3600000).toFixed(2); }
 function elapsed(ci){ const ms=Date.now()-new Date(ci); return `${Math.floor(ms/3600000)}h ${Math.floor((ms%3600000)/60000)}m`; }
 function genId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2); }
 function getActive(eid){ return S.punches.find(p=>p.eid===eid&&!p.out)||null; }
-function weekStart(off){ const d=new Date(); d.setDate(d.getDate()-d.getDay()+(off*7)); d.setHours(0,0,0,0); return d; }
+// The pay week runs Tuesday through Monday. 0=Sunday, so Tuesday is 2 — change
+// this one number if the pay period ever moves.
+const WEEK_START_DAY = 2;
+function weekStart(off){
+  const d=new Date();
+  d.setDate(d.getDate()-((d.getDay()-WEEK_START_DAY+7)%7)+(off*7));
+  d.setHours(0,0,0,0);
+  return d;
+}
 function getFlag(eid,date){ return S.flags[`${eid}_${date}`]||{}; }
 // A shift belongs to the day it STARTED, and a role switch does not start a new
 // shift — it closes one punch and opens the next in the same instant. So the work
