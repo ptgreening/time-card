@@ -226,6 +226,53 @@ c.font=WHITE; c.fill=GRAND; c.number_format='0.00'
 c.alignment=Alignment(horizontal='center'); c.border=BOX
 br.sheet_view.showGridLines=False
 
+# ── By Person ─────────────────────────────────────────────────
+# A block per person, and inside it a block per role they actually worked, laid
+# out the way a payroll sheet is read: every day of the period listed even when
+# it is blank, so the shape is the same for everyone.
+bp=wb.create_sheet('By Person',2)
+bp['A1']=f'{LOC} · week ending {P1:%B %d, %Y}'; bp['A1'].font=TITLE
+bp['A2']=f'{P0:%A, %B %d} through {P1:%A, %B %d} · net hours, after any meal deduction'
+bp['A2'].font=MUTED
+for cl,w in (('A',26),('B',12),('C',13),('D',30)): bp.column_dimensions[cl].width=w
+weekdays=[P0+dt.timedelta(days=i) for i in range(7)]
+r=4
+for name,recs in by.items():
+    byday={x['day']:x for x in recs}
+    total=sum(x['net'] for x in recs)
+    c=bp.cell(r,1,name); c.font=Font(name=A,size=12,bold=True,color='FFFFFF'); c.fill=GRAND
+    c=bp.cell(r,2,round(total,2)); c.font=WHITE; c.fill=GRAND
+    c.number_format='0.00'; c.alignment=Alignment(horizontal='center')
+    c=bp.cell(r,3,'hrs total'); c.font=WHITE; c.fill=GRAND
+    c=bp.cell(r,4,'OVER 40' if total>40 else ''); c.font=WHITE; c.fill=GRAND
+    for i in range(1,5): bp.cell(r,i).border=BOX
+    r+=1
+    worked=[rl for rl in ROLES if any(x['per'][rl]>1e-9 for x in recs)]
+    for rl in worked:
+        c=bp.cell(r,1,rl); c.font=BOLD; c.fill=ROLE_F; c.border=BOX
+        for i in (2,3,4): bp.cell(r,i).fill=ROLE_F; bp.cell(r,i).border=BOX
+        r+=1
+        for d in weekdays:
+            x=byday.get(d)
+            v=x['per'][rl] if x else 0
+            c=bp.cell(r,1,f'   {d:%a} {d.month}/{d.day}'); c.font=BASE; c.border=BOX
+            c=bp.cell(r,2,round(v,2) if v>1e-9 else None)
+            c.font=BASE; c.number_format='0.00'; c.alignment=Alignment(horizontal='center'); c.border=BOX
+            note_bits=[]
+            if x and x['split'] and v>1e-9: note_bits.append('split shift')
+            if x and x['ded'] and v>1e-9:   note_bits.append('30-min lunch')
+            c=bp.cell(r,4,', '.join(note_bits)); c.font=MUTED; c.border=BOX
+            bp.cell(r,3).border=BOX
+            r+=1
+        c=bp.cell(r,1,'   TOTAL'); c.font=BOLD; c.border=BOX; c.fill=TOT_F
+        c=bp.cell(r,2,round(sum(x['per'][rl] for x in recs),2))
+        c.font=BOLD; c.number_format='0.00'; c.alignment=Alignment(horizontal='center')
+        c.border=BOX; c.fill=TOT_F
+        for i in (3,4): bp.cell(r,i).fill=TOT_F; bp.cell(r,i).border=BOX
+        r+=2
+    r+=1
+bp.sheet_view.showGridLines=False
+
 # ── Check These ───────────────────────────────────────────────
 ck=wb.create_sheet('Check These',2)
 ck['A1']='Days that need your eye'; ck['A1'].font=TITLE
