@@ -1,25 +1,164 @@
-{"period":["2026-09-22","2026-09-28"],"location":"Haunted Trail",
-"lunch_button_roles":["Actor","Makeup Artist","Crowd Control","Carnival Crew","Manager","Wardrobe"],
-"lunch_clockout_roles":["Build Crew","Axe Throw","Room Escape"],
-"day_lunch":[["muhbo9c6mru8ur34s9","2026-09-25"],["mubzv51wr1f984gt6t","2026-09-26"]],
-"punches":[
-["mubzgy06nhnk1elp9yc","Jeff Neitzel","Makeup Artist","2026-09-24 17:24:55","2026-09-24 17:27:40",false],
-["mubztcc1uky0gpltgaj","Larry Higbee","Makeup Artist","2026-09-24 17:45:00","2026-09-24 19:45:00",false],
-["mubztcc1uky0gpltgaj","Larry Higbee","Actor","2026-09-24 20:00:00","2026-09-24 21:30:00",false],
-["mubztcc1uky0gpltgaj","Larry Higbee","Makeup Artist","2026-09-25 16:53:02","2026-09-25 19:28:00",false],
-["mubztcc1uky0gpltgaj","Larry Higbee","Actor","2026-09-25 19:28:00","2026-09-25 22:31:01",false],
-["mubztcc1uky0gpltgaj","Larry Higbee","Makeup Artist","2026-09-26 17:38:07","2026-09-26 19:34:21",false],
-["mubztcc1uky0gpltgaj","Larry Higbee","Actor","2026-09-26 19:34:21","2026-09-26 22:25:27",false],
-["mubztcc1uky0gpltgaj","Larry Higbee","Makeup Artist","2026-09-27 17:15:18","2026-09-27 19:34:19",false],
-["mubztcc1uky0gpltgaj","Larry Higbee","Makeup Artist","2026-09-28 17:00:09","2026-09-28 18:10:17",false],
-["mubzu7qmgfry8o8mr39","Lee Croft","Actor","2026-09-25 17:30:00","2026-09-25 22:30:00",false],
-["mubzu7qmgfry8o8mr39","Lee Croft","Makeup Artist","2026-09-26 17:20:24","2026-09-26 19:30:00",false],
-["mubzu7qmgfry8o8mr39","Lee Croft","Actor","2026-09-26 19:30:00","2026-09-26 22:27:00",false],
-["mubzu7qmgfry8o8mr39","Lee Croft","Makeup Artist","2026-09-27 17:30:00","2026-09-27 19:45:00",false],
-["mubzv51wr1f984gt6t","Luca Dismukes","Makeup Artist","2026-09-24 17:30:00","2026-09-24 19:30:00",false],
-["mubzv51wr1f984gt6t","Luca Dismukes","Makeup Artist","2026-09-25 17:32:03","2026-09-25 19:33:05",false],
-["mubzv51wr1f984gt6t","Luca Dismukes","Makeup Artist","2026-09-26 17:30:29","2026-09-26 19:31:15",false],
-["mubzv51wr1f984gt6t","Luca Dismukes","Actor","2026-09-26 19:31:15","2026-09-26 22:00:44",false],
-["mubzv51wr1f984gt6t","Luca Dismukes","Makeup Artist","2026-09-27 17:30:00","2026-09-27 19:30:00",false],
-["muhbo9c6mru8ur34s9","Zombie Joe","Makeup Artist","2026-09-25 11:58:10","2026-09-25 12:24:48",false],
-["muhbo9c6mru8ur34s9","Zombie Joe","Actor","2026-09-25 12:24:48","2026-09-25 12:45:04",false]]}
+{
+ "period": [
+  "2026-09-22",
+  "2026-09-28"
+ ],
+ "location": "Haunted Trail",
+ "lunch_button_roles": [
+  "Actor",
+  "Makeup Artist",
+  "Crowd Control",
+  "Carnival Crew",
+  "Manager",
+  "Wardrobe"
+ ],
+ "lunch_clockout_roles": [
+  "Build Crew",
+  "Axe Throw",
+  "Room Escape"
+ ],
+ "day_lunch": [
+  [
+   "mubzv51wr1f984gt6t",
+   "2026-09-26"
+  ]
+ ],
+ "punches": [
+  [
+   "mubztcc1uky0gpltgaj",
+   "Larry Higbee",
+   "Makeup Artist",
+   "2026-09-24 17:45:00",
+   "2026-09-24 19:45:00",
+   false
+  ],
+  [
+   "mubztcc1uky0gpltgaj",
+   "Larry Higbee",
+   "Actor",
+   "2026-09-24 20:00:00",
+   "2026-09-24 21:30:00",
+   false
+  ],
+  [
+   "mubztcc1uky0gpltgaj",
+   "Larry Higbee",
+   "Makeup Artist",
+   "2026-09-25 16:53:02",
+   "2026-09-25 19:28:00",
+   false
+  ],
+  [
+   "mubztcc1uky0gpltgaj",
+   "Larry Higbee",
+   "Actor",
+   "2026-09-25 19:28:00",
+   "2026-09-25 22:31:01",
+   false
+  ],
+  [
+   "mubztcc1uky0gpltgaj",
+   "Larry Higbee",
+   "Makeup Artist",
+   "2026-09-26 17:38:07",
+   "2026-09-26 19:34:21",
+   false
+  ],
+  [
+   "mubztcc1uky0gpltgaj",
+   "Larry Higbee",
+   "Actor",
+   "2026-09-26 19:34:21",
+   "2026-09-26 22:25:27",
+   false
+  ],
+  [
+   "mubztcc1uky0gpltgaj",
+   "Larry Higbee",
+   "Makeup Artist",
+   "2026-09-27 17:15:18",
+   "2026-09-27 19:34:19",
+   false
+  ],
+  [
+   "mubztcc1uky0gpltgaj",
+   "Larry Higbee",
+   "Makeup Artist",
+   "2026-09-28 17:00:09",
+   "2026-09-28 18:10:17",
+   false
+  ],
+  [
+   "mubzu7qmgfry8o8mr39",
+   "Lee Croft",
+   "Actor",
+   "2026-09-25 17:30:00",
+   "2026-09-25 22:30:00",
+   false
+  ],
+  [
+   "mubzu7qmgfry8o8mr39",
+   "Lee Croft",
+   "Makeup Artist",
+   "2026-09-26 17:20:24",
+   "2026-09-26 19:30:00",
+   false
+  ],
+  [
+   "mubzu7qmgfry8o8mr39",
+   "Lee Croft",
+   "Actor",
+   "2026-09-26 19:30:00",
+   "2026-09-26 22:27:00",
+   false
+  ],
+  [
+   "mubzu7qmgfry8o8mr39",
+   "Lee Croft",
+   "Makeup Artist",
+   "2026-09-27 17:30:00",
+   "2026-09-27 19:45:00",
+   false
+  ],
+  [
+   "mubzv51wr1f984gt6t",
+   "Luca Dismukes",
+   "Makeup Artist",
+   "2026-09-24 17:30:00",
+   "2026-09-24 19:30:00",
+   false
+  ],
+  [
+   "mubzv51wr1f984gt6t",
+   "Luca Dismukes",
+   "Makeup Artist",
+   "2026-09-25 17:32:03",
+   "2026-09-25 19:33:05",
+   false
+  ],
+  [
+   "mubzv51wr1f984gt6t",
+   "Luca Dismukes",
+   "Makeup Artist",
+   "2026-09-26 17:30:29",
+   "2026-09-26 19:31:15",
+   false
+  ],
+  [
+   "mubzv51wr1f984gt6t",
+   "Luca Dismukes",
+   "Actor",
+   "2026-09-26 19:31:15",
+   "2026-09-26 22:00:44",
+   false
+  ],
+  [
+   "mubzv51wr1f984gt6t",
+   "Luca Dismukes",
+   "Makeup Artist",
+   "2026-09-27 17:30:00",
+   "2026-09-27 19:30:00",
+   false
+  ]
+ ]
+}
