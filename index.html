@@ -62,6 +62,18 @@
     .chip-red { background: #FCEBEB; color: #A32D2D; }
     .chip-amber { background: #FAEEDA; color: #BA7517; }
     .chip-green { background: #EAF3DE; color: #3B6D11; }
+.tcard { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .tcard th { background: #F9F9FB; font-weight: 500; font-size: 11px; color: #6C6C70;
+                padding: 8px 6px; border: 1px solid #E5E5EA; white-space: nowrap; text-align: center; }
+    .tcard td { border: 1px solid #E5E5EA; padding: 4px 5px; vertical-align: middle; }
+    .tcard td.day { white-space: nowrap; font-weight: 500; padding-left: 10px; }
+    .tcard tr.today td { background: #FFFBF3; }
+    .tcard tr.locked td { background: #F7F7F9; color: #8E8E93; }
+    .tcard input[type=time] { margin-top: 0; padding: 5px 4px; font-size: 12px; min-width: 88px; }
+    .tcard select { margin-top: 0; padding: 5px 6px; font-size: 12px; min-width: 116px; }
+    .tcard .tot { text-align: right; font-variant-numeric: tabular-nums; padding-right: 10px; white-space: nowrap; }
+    .tcard .sep { border-left: 2px solid #D8D8DE; }
+    .scrollx { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 12px; border: 1px solid #E5E5EA; background:#fff; }
     .del { background: none; border: none; color: #A32D2D; font-size: 12px; cursor: pointer; font-family: inherit; padding: 0; }
     #offline-bar { display: none; background: #A32D2D; color: #FCEBEB; text-align: center; padding: 9px 16px; font-size: 13px; font-weight: 500; }
     body.offline #offline-bar { display: block; }
@@ -216,6 +228,7 @@ const S = {
   empCodeBuf:'', empCodeErr:false, codeOk:false,
   codeOkUntil:0, afterCode:null, requests:[], notes:[],
   editEmp:null, editRole:null, locFilter:'', addEntry:null,
+  tcEmp:null, tcOff:-1, tcRows:null, tcDirty:false,
   showFlagSearch:false, resetTimer:null, resetInterval:null
 };
 // Opening the app as .../?kiosk=1 marks the device a shared kiosk for good, so a
@@ -942,11 +955,12 @@ function renderDashTabs(){
   const tabs=[['status','Status'],['daily','Daily'],['weekly','Weekly'],
               ['requests', n?`Requests (${n})`:'Requests'],
               ['notes', m?`Notes (${m})`:'Notes']];
-  if(S.isAdmin)tabs.push(['settings','Settings']);
+  if(S.isAdmin){ tabs.push(['timecard','Time Card']); tabs.push(['settings','Settings']); }
   document.getElementById('dash-tabs').innerHTML=tabs.map(([id,lbl])=>`<button class="tab${S.tab===id?' on':''}" onclick="setTab('${id}')">${lbl}</button>`).join('');
 }
-function setTab(t){ S.tab=t; S.showFlagSearch=false; S.addEntry=null; S.editEmp=null; S.editRole=null; renderDashTabs(); renderDash(); }
-function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; renderDashFilter(); if(S.tab==='status')b.innerHTML=buildStatus(); else if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else if(S.tab==='requests')b.innerHTML=buildRequests(); else if(S.tab==='notes')b.innerHTML=buildNotes(); else b.innerHTML=buildSettings(); }
+function setTab(t){ if(S.tab==='timecard'&&t!=='timecard'&&S.tcDirty&&!confirm('Leave without saving this time card?'))return;
+  S.tab=t; S.showFlagSearch=false; S.addEntry=null; S.tcRows=null; S.tcDirty=false; S.editEmp=null; S.editRole=null; renderDashTabs(); renderDash(); }
+function renderDash(){ const b=document.getElementById('dash-body'); if(!b)return; renderDashFilter(); if(S.tab==='status')b.innerHTML=buildStatus(); else if(S.tab==='daily')b.innerHTML=buildDaily(); else if(S.tab==='weekly')b.innerHTML=buildWeekly(); else if(S.tab==='requests')b.innerHTML=buildRequests(); else if(S.tab==='notes')b.innerHTML=buildNotes(); else if(S.tab==='timecard')b.innerHTML=buildTimeCard(); else b.innerHTML=buildSettings(); }
 
 // ── NOTES INBOX ──────────────────────────────────────────────
 function buildNotes(){
@@ -1196,6 +1210,257 @@ function buildWeekly(){
   wkp.forEach(p=>{ if(!sum[p.eid])sum[p.eid]={name:p.name,roles:{},dates:new Set()}; const ms=new Date(p.out)-new Date(p.in); sum[p.eid].roles[p.role]=(sum[p.eid].roles[p.role]||0)+ms; sum[p.eid].dates.add(dateKey(p.in)); });
   const empList=Object.entries(sum).sort(([,a],[,b])=>a.name.localeCompare(b.name));
   return`<div class="wb"><button class="wn" onclick="S.wkOff--;renderDash()">&#8592; Prev</button><div style="text-align:center"><div style="font-weight:500;font-size:14px">${fmtWk(ws)} – ${fmtWk(we)}</div>${S.wkOff===0?'<div style="font-size:11px;color:#BA7517;font-weight:500">Current week</div>':''}</div><button class="wn" onclick="if(S.wkOff<0){S.wkOff++;renderDash()}" ${S.wkOff>=0?'disabled style="opacity:.3"':''}>Next &#8594;</button></div>${S.isAdmin?`<button onclick="exportCSV('week')" style="width:100%;padding:12px;border-radius:12px;border:none;background:#EF9F27;color:#412402;font-size:15px;font-weight:500;cursor:pointer;margin-bottom:14px"><i class="ti ti-download"></i> Export CSV</button>`:''} ${empList.length===0?`<div style="text-align:center;color:#6C6C70;font-size:14px;margin-top:30px">No completed shifts this week</div>`:''}${empList.map(([eid,data])=>{ const rawMs=Object.values(data.roles).reduce((a,b)=>a+b,0); const ld=[...data.dates].filter(dk=>getFlag(eid,dk).lunch).length*30*60*1000; const net=Math.max(0,rawMs-ld); const hasN=[...data.dates].some(dk=>getFlag(eid,dk).ncns); const hasS=[...data.dates].some(dk=>getFlag(eid,dk).short); const mbpDays=[...data.dates].filter(dk=>dayAlerts(eid,dk).mbp).length; const otDays=[...data.dates].filter(dk=>dayAlerts(eid,dk).ot).length; const otWeek=net>=40*3600000; return`<div class="tc"><div class="th"><span>${data.name}</span><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end">${mbpDays?`<span class="chip chip-red">MBP ×${mbpDays}</span>`:''}${otDays?`<span class="chip chip-amber">OT day ×${otDays}</span>`:''}${otWeek?'<span class="chip chip-amber">OT week</span>':''}${hasN?'<span class="chip chip-red">NCNS</span>':''}${hasS?'<span class="chip chip-amber">&lt;2hr</span>':''}<span style="font-size:12px;font-weight:400;color:#6C6C70">${hoursD(net)} hrs</span></div></div>${Object.entries(data.roles).map(([r,ms])=>`<div style="padding:6px 16px;display:flex;justify-content:space-between;font-size:13px;border-bottom:1px solid #E5E5EA"><span style="color:#6C6C70">${r}</span><span>${hoursD(ms)}</span></div>`).join('')}${ld>0?`<div style="padding:6px 16px;display:flex;justify-content:space-between;font-size:12px;border-bottom:1px solid #E5E5EA;color:#A32D2D"><span>Lunch deductions</span><span>-${hoursD(ld)}</span></div>`:''}<div class="tt"><div style="display:flex;justify-content:space-between;font-size:13px;font-weight:500"><span style="color:#3B6D11">Net total</span><span style="color:#173404">${hoursD(net)}</span></div></div></div>`; }).join('')}`;
+}
+
+// ── TIME CARD ────────────────────────────────────────────────
+// A week of one person's hours laid out like the paper card it is transcribed
+// from. Whatever was already clocked loads into the grid, so this edits a week
+// rather than only adding to it.
+const TC_SLOTS=2;   // two role stints per day covers the Makeup-then-Actor pattern
+
+function tcWeekDays(off){
+  const ws=weekStart(off), out=[];
+  for(let i=0;i<7;i++){ const d=new Date(ws); d.setDate(d.getDate()+i); out.push(d); }
+  return out;
+}
+
+// Pull the week's punches into editable slots, one row per day.
+function tcLoad(){
+  const emp=S.roster.find(e=>e.id===S.tcEmp); if(!emp) return;
+  S.tcRows={};
+  for(const d of tcWeekDays(S.tcOff)){
+    const key=dateKey(d.toISOString());
+    const ps=S.punches.filter(p=>p.eid===emp.id&&dateKey(p.in)===key)
+                      .sort((a,b)=>new Date(a.in)-new Date(b.in));
+    S.tcRows[key]={
+      // More than two stints cannot be shown in two slots without losing one,
+      // so the day is left alone and pointed at the Daily tab instead.
+      locked: ps.length>TC_SLOTS,
+      lunch: !!getFlag(emp.id,key).lunch,
+      slots: Array.from({length:TC_SLOTS},(_,i)=>{
+        const p=ps[i];
+        return p ? {id:p.id, role:p.role, in:isoToT(p.in), out:p.out?isoToT(p.out):'',
+                    open:!p.out, origIn:p.in, origOut:p.out}
+                 : {id:null, role:'', in:'', out:''};
+      })
+    };
+  }
+  S.tcDirty=false;
+}
+
+function tcSet(key,slot,field,val){
+  const r=S.tcRows[key]; if(!r||r.locked) return;
+  if(field==='lunch') r.lunch=val; else r.slots[slot][field]=val;
+  S.tcDirty=true; tcRefreshTotals();
+}
+
+// Minutes worked in one row, and whether it is usable.
+function tcRowCalc(key){
+  const r=S.tcRows[key]; let mins=0, bad=null, filled=0;
+  for(const s of r.slots){
+    const any=s.role||s.in||s.out;
+    if(!any) continue;
+    filled++;
+    if(!s.role){ bad='pick a role'; continue; }
+    if(!s.in||!s.out){ bad='needs both times'; continue; }
+    let a=tToIso(s.in,key), b=tToIso(s.out,key);
+    if(new Date(b)<=new Date(a)){                     // ran past midnight
+      const d=new Date(key+'T12:00:00'); d.setDate(d.getDate()+1);
+      b=tToIso(s.out,dateKey(d.toISOString()));
+    }
+    const h=(new Date(b)-new Date(a))/3600000;
+    if(h>16){ bad='over 16 hours'; continue; }
+    mins+=h*60;
+  }
+  const net=Math.max(0, mins-(r.lunch?30:0));
+  return {mins,net,bad,filled};
+}
+
+function tcRefreshTotals(){
+  let week=0;
+  for(const key of Object.keys(S.tcRows)){
+    const c=tcRowCalc(key), el=document.getElementById('tc-tot-'+key);
+    week+=c.net;
+    if(el){
+      el.textContent = c.bad ? c.bad : (c.filled ? (c.net/60).toFixed(2) : '—');
+      el.style.color = c.bad ? '#A32D2D' : (c.filled ? '#000' : '#C7C7CC');
+    }
+  }
+  const w=document.getElementById('tc-week');
+  if(w) w.textContent=(week/60).toFixed(2)+' hrs';
+  const btn=document.getElementById('tc-save');
+  if(btn) btn.disabled=!S.tcDirty;
+}
+
+function buildTimeCard(){
+  if(!S.tcEmp) return tcPicker();
+  const emp=S.roster.find(e=>e.id===S.tcEmp);
+  if(!emp){ S.tcEmp=null; return tcPicker(); }
+  if(!S.tcRows) tcLoad();
+  const days=tcWeekDays(S.tcOff), ws=days[0], we=days[6];
+  const roles=empRoles(emp);
+  const roleOpts=v=>`<option value="">—</option>`+
+    roles.map(r=>`<option${r===v?' selected':''}>${esc(r)}</option>`).join('')+
+    (v&&!roles.includes(v)?`<option selected>${esc(v)}</option>`:'');
+
+  const rows=days.map(d=>{
+    const key=dateKey(d.toISOString()), r=S.tcRows[key];
+    if(r.locked) return `<tr class="locked"><td class="day">${d.toLocaleDateString('en-US',{weekday:'short'})} ${d.getMonth()+1}/${d.getDate()}</td>
+      <td colspan="7" style="font-size:12px">${r.slots.length}+ separate stints this day — edit it on the Daily tab
+      <button class="del" style="color:#007AFF;margin-left:8px" onclick="jumpToDay('${key}')">Open ${d.getMonth()+1}/${d.getDate()} →</button></td>
+      <td class="tot">—</td></tr>`;
+    const cell=(i,f,cls='')=>{
+      const s=r.slots[i];
+      if(f==='role') return `<td class="${cls}"><select onchange="tcSet('${key}',${i},'role',this.value)">${roleOpts(s.role)}</select></td>`;
+      return `<td class="${cls}"><input type="time" value="${s[f]}" onchange="tcSet('${key}',${i},'${f}',this.value)"/></td>`;
+    };
+    return `<tr${key===todayKey()?' class="today"':''}>
+      <td class="day">${d.toLocaleDateString('en-US',{weekday:'short'})} ${d.getMonth()+1}/${d.getDate()}</td>
+      ${cell(0,'role')}${cell(0,'in')}${cell(0,'out')}
+      ${cell(1,'role','sep')}${cell(1,'in')}${cell(1,'out')}
+      <td style="text-align:center"><input type="checkbox" ${r.lunch?'checked':''}
+        onchange="tcSet('${key}',0,'lunch',this.checked)" style="width:auto;margin:0"/></td>
+      <td class="tot" id="tc-tot-${key}">—</td></tr>`;
+  }).join('');
+
+  return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap">
+      <div>
+        <div style="font-weight:500;font-size:16px">${esc(emp.name)}</div>
+        <div style="font-size:12px;color:#6C6C70">${esc(empLocs(emp).join(', '))}</div>
+      </div>
+      <button class="wn" onclick="tcClose()">Change person</button>
+    </div>
+    <div class="wb">
+      <button class="wn" onclick="tcWeek(-1)">&#8592; Prev</button>
+      <div style="text-align:center">
+        <div style="font-weight:500;font-size:13px">${ws.toLocaleDateString('en-US',{month:'short',day:'numeric'})} – ${we.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
+        <div style="font-size:11px;color:#6C6C70">Tuesday through Monday</div>
+      </div>
+      <button class="wn" onclick="tcWeek(1)" ${S.tcOff>=0?'disabled style="opacity:.3"':''}>Next &#8594;</button>
+    </div>
+    <div class="scrollx"><table class="tcard">
+      <thead><tr>
+        <th style="text-align:left;padding-left:10px">Day</th>
+        <th>Role</th><th>In</th><th>Out</th>
+        <th class="sep">Then role</th><th>In</th><th>Out</th>
+        <th>30-min<br>lunch</th><th>Hours</th>
+      </tr></thead><tbody>${rows}</tbody></table></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:12px;flex-wrap:wrap">
+      <div style="font-size:12px;color:#6C6C70">Times already clocked are loaded in. Clear both times to remove a stint.</div>
+      <div style="font-size:15px;font-weight:500">Week total <span id="tc-week" style="margin-left:8px">0.00 hrs</span></div>
+    </div>
+    <button class="btn btn-green" id="tc-save" onclick="tcSave()" disabled>Save time card</button>
+    <button class="btn btn-ghost" onclick="tcClose()">Close without saving</button>`;
+}
+
+// Work out what the grid means for the records that exist: a slot that gained
+// times is an insert, one whose times moved is an update, one that was cleared is
+// a delete. Nothing is written until the whole week reads cleanly.
+function tcPlan(){
+  const emp=S.roster.find(e=>e.id===S.tcEmp);
+  const loc=empLocs(emp)[0]||S.config.locations[0];
+  const add=[],upd=[],del=[],flag=[],errs=[];
+  for(const key of Object.keys(S.tcRows)){
+    const r=S.tcRows[key];
+    if(r.locked) continue;
+    const c=tcRowCalc(key);
+    if(c.bad){ errs.push(`${fmtDateDisp(key)} — ${c.bad}`); continue; }
+    r.slots.forEach(s=>{
+      const any=s.role||s.in||s.out;
+      if(!any){ if(s.id) del.push(s.id); return; }
+      let a=tToIso(s.in,key), b=tToIso(s.out,key);
+      if(new Date(b)<=new Date(a)){
+        const d=new Date(key+'T12:00:00'); d.setDate(d.getDate()+1);
+        b=tToIso(s.out,dateKey(d.toISOString()));
+      }
+      if(s.id){
+        if(s.origIn!==a||s.origOut!==b||s.role!==S.punches.find(p=>p.id===s.id)?.role)
+          upd.push({id:s.id,role:s.role,in:a,out:b});
+      } else {
+        add.push({id:genId(),eid:emp.id,name:emp.name,role:s.role,loc,in:a,out:b});
+      }
+    });
+    const was=!!getFlag(emp.id,key).lunch;
+    if(was!==r.lunch) flag.push({key,lunch:r.lunch});
+  }
+  // A day left entirely blank that had punches: those ids are already in del.
+  return {add,upd,del,flag,errs};
+}
+
+async function tcSave(){
+  if(!requireOnline())return;
+  const plan=tcPlan();
+  if(plan.errs.length){ alert('Fix these first:\n\n'+plan.errs.join('\n')); return; }
+  const parts=[];
+  if(plan.add.length) parts.push(`${plan.add.length} new entr${plan.add.length===1?'y':'ies'}`);
+  if(plan.upd.length) parts.push(`${plan.upd.length} changed`);
+  if(plan.del.length) parts.push(`${plan.del.length} REMOVED`);
+  if(plan.flag.length) parts.push(`${plan.flag.length} lunch change${plan.flag.length===1?'':'s'}`);
+  if(!parts.length){ showToast('Nothing changed'); return; }
+  // Removals are the only part that destroys something, so they are named.
+  if(plan.del.length && !confirm(`Save this time card?\n\n${parts.join('\n')}\n\nRemoved entries cannot be brought back.`)) return;
+
+  const btn=document.getElementById('tc-save'); if(btn){btn.disabled=true;btn.textContent='Saving…'}
+  const stamp={entered_by:'Admin',entered_at:new Date().toISOString()};
+  try{
+    if(plan.del.length){
+      const {error}=await db.from('tc_punches').delete().in('id',plan.del);
+      if(error) throw error;
+      S.punches=S.punches.filter(p=>!plan.del.includes(p.id));
+    }
+    for(const u of plan.upd){
+      const {error}=await db.from('tc_punches')
+        .update({role:u.role,clock_in:u.in,clock_out:u.out,...stamp}).eq('id',u.id);
+      if(error) throw error;
+      S.punches=S.punches.map(p=>p.id===u.id?{...p,role:u.role,in:u.in,out:u.out}:p);
+    }
+    if(plan.add.length){
+      const {error}=await db.from('tc_punches').insert(plan.add.map(a=>({
+        id:a.id,employee_id:a.eid,employee_name:a.name,role:a.role,location:a.loc,
+        clock_in:a.in,clock_out:a.out,lunch_out:false,...stamp})));
+      if(error) throw error;
+      plan.add.forEach(a=>S.punches.push({...a,lunchOut:false}));
+    }
+    for(const f of plan.flag){
+      const k=`${S.tcEmp}_${f.key}`;
+      await dbSetFlag(S.tcEmp,f.key,{...(S.flags[k]||{}),lunch:f.lunch});
+    }
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent='Save time card'}
+    showToast('⚠️ Save failed — nothing further was written'); return;
+  }
+  S.tcRows=null; S.tcDirty=false;
+  showToast(`Time card saved — ${parts.join(', ')} ✓`,4000);
+  renderDash(); setTimeout(tcRefreshTotals,0);
+}
+
+function tcPicker(){
+  return `<div class="card">
+    <div style="font-weight:500;margin-bottom:2px">Time card</div>
+    <div style="font-size:13px;color:#6C6C70">Type a week of hours straight off a paper card. Pick who it is for.</div>
+    <input id="tc-search" placeholder="Type name…" oninput="tcSearch()" autocomplete="off"/>
+    <div id="tc-results" style="margin-top:8px"></div>
+  </div>`;
+}
+function tcSearch(){
+  const q=(document.getElementById('tc-search')||{}).value||'';
+  const el=document.getElementById('tc-results'); if(!el)return;
+  if(!q.trim()){el.innerHTML='';return}
+  const f=S.roster.filter(e=>e.name.toLowerCase().includes(q.toLowerCase()))
+    .sort((a,b)=>a.name.localeCompare(b.name)).slice(0,8);
+  el.innerHTML=f.length
+    ? f.map(e=>`<button onclick="tcOpen('${e.id}')" style="display:block;width:100%;padding:10px 12px;background:#F9F9FB;border:1px solid #E5E5EA;border-radius:8px;text-align:left;cursor:pointer;font-size:14px;font-family:inherit;color:#000;margin-bottom:4px">${esc(e.name)}</button>`).join('')
+    : `<p style="font-size:13px;color:#6C6C70">No match</p>`;
+}
+function tcOpen(eid){ S.tcEmp=eid; S.tcOff=-1; S.tcRows=null; renderDash(); setTimeout(tcRefreshTotals,0); }
+function tcClose(){
+  if(S.tcDirty&&!confirm('Close without saving this time card?'))return;
+  S.tcEmp=null; S.tcRows=null; S.tcDirty=false; renderDash();
+}
+function tcWeek(d){
+  if(S.tcDirty&&!confirm('Change week without saving?'))return;
+  if(d>0&&S.tcOff>=0)return;
+  S.tcOff+=d; S.tcRows=null; renderDash(); setTimeout(tcRefreshTotals,0);
 }
 
 // ── SETTINGS ─────────────────────────────────────────────────
