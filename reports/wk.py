@@ -9,6 +9,8 @@ D=json.load(open('wk.json'))
 f=lambda s: dt.datetime.strptime(s,'%Y-%m-%d %H:%M:%S')
 P0,P1=[dt.date.fromisoformat(x) for x in D['period']]
 LOC=D['location']; LUNCH={tuple(x) for x in D['day_lunch']}
+# Which role an unpaid meal is charged against, in order of preference.
+MEAL_ROLE_ORDER=['Actor','Crowd Control']
 OUT=f'HauntedTrail-Week-Ending-{P1}.xlsx'
 
 A='Arial'
@@ -35,12 +37,22 @@ for (name,eid,day),ss in sorted(days.items()):
     gross=sum((s['o']-s['i']).total_seconds()/3600 for s in ss)
     ded=0.5 if (eid,day.isoformat()) in LUNCH else 0
     net=gross-ded
-    # Each role keeps its own time; an unpaid meal comes off every role it touched
-    # in proportion, so the role columns still add up to what is actually paid.
+    # The unpaid meal comes off Actor, or Crowd Control where there is no Actor.
+    # If that role is too short to absorb the whole break the remainder falls to
+    # the next one, and anything still left is spread across the rest — so the
+    # role columns always add up to what is actually paid.
     per={r:0.0 for r in ROLES}
     for s in ss: per[s['role']]+=(s['o']-s['i']).total_seconds()/3600
-    scale=(net/gross) if gross else 0
-    per={r:v*scale for r,v in per.items()}
+    left=ded
+    for rl in MEAL_ROLE_ORDER:
+        if left<=0: break
+        if rl not in per: continue          # that role was not worked this day
+        take=min(per[rl],left); per[rl]-=take; left-=take
+    if left>1e-9:
+        rest=sum(v for r,v in per.items() if v>0)
+        if rest>0:
+            for r in list(per):
+                if per[r]>0: per[r]-=left*(per[r]/rest)
     rows.append(dict(name=name,eid=eid,day=day,segs=ss,gross=gross,ded=ded,net=net,per=per,
         cin=ss[0]['i'],cout=ss[-1]['o'],bo=brk[0] if brk else None,bi=brk[1] if brk else None,
         meal=1 if brk and (brk[1]-brk[0])>=dt.timedelta(minutes=30) else 0))
@@ -93,9 +105,10 @@ note('Hours format','Decimal, two places. 7.50 means seven hours thirty minutes.
 note('Hours by role',f'One column per role worked: {", ".join(ROLES)}. They add up to Net Hrs on every row.')
 note('By Role tab','The same hours the other way round — each role down the side, each person across, '
      'with a total per role at the bottom.')
-note('Where a meal deduction lands','An unpaid meal comes off each role that day in proportion to the time '
-     'spent in it, so the role columns still total what is actually paid. On a day with no deduction the role '
-     'hours are exactly the time clocked in that role.')
+note('Where a meal deduction lands','The unpaid half hour is charged against Actor, or against Crowd Control '
+     'where there is no Actor time that day. If that role is too short to absorb it the remainder falls to the '
+     'next, so the role columns always total what is actually paid. On a day with no deduction the role hours '
+     'are exactly the time clocked in that role.')
 note('Net hours','Time on the clock minus any unpaid break. Break Out and Break In show the longest gap between '
      'punches that day. Any gap is unpaid — the Meal? column says whether it was long enough to count as a meal.')
 note('Day assignment','A shift belongs to the day it STARTED. One running past midnight stays on the day it began.')
